@@ -43,8 +43,6 @@ extern zend_module_entry php_server_module_entry;
 	and END macros here:
 
 ZEND_BEGIN_MODULE_GLOBALS(php_server)
-	zend_long  global_value;
-	char *global_string;
 ZEND_END_MODULE_GLOBALS(php_server)
 */
 
