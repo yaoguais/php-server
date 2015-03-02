@@ -61,13 +61,6 @@ PHP_INI_END()
 /* }}} */
 
 
-/* {{{ 测试模块是否正常加载
- */
-PHP_FUNCTION(test_php_server){
-	printf("function is ok !");
-	RETURN_STRING("return value");
-}
-/* }}} */
 
 /* 定义一些常亮 */
 //最大的子进程数量
@@ -95,7 +88,7 @@ int php_server_set_nonblock(int fd){
 
 /* 为某个fd向epoll事件表添加边沿触发式可读事件  */
 void php_server_epoll_add_read_fd(int epoll_fd,int fd){
-	epoll_event event;
+	struct epoll_event event;
 	event.data.fd = fd;
 	event.events = EPOLLIN | EPOLLET;
 	epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd, &event);
@@ -193,8 +186,8 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 	process_global->socket_fd = socket_fd;
 
 	process_global->process_number = 0;
-
-	process_global->is_stop = true;	
+	
+	process_global->is_stop = 1;	
 
 	for(i=0;	i<process_number;	i++){
 
@@ -236,7 +229,7 @@ zend_bool php_server_run_init(){
 	if(process_global->epoll_fd == -1){
 		return FAILURE;
 	}
-	process_global->is_stop = false;
+	process_global->is_stop = 0;
 	return SUCCESS;
 }
 
@@ -250,7 +243,7 @@ zend_bool php_server_clear_init(){
 /* 启动父进程*/
 int php_server_run_master_process(){
 		
-	epoll_event events[MAX_EPOLL_NUMBER];
+	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,sock_fd,child_index = 0,child_pid,child_pipe;
 	char data = '1';
 
@@ -268,7 +261,7 @@ int php_server_run_master_process(){
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
 			/*说明有的新的连接到来，那么选择一个进程处理这个连接*/
-			if(sock_fd == process_gloal->sock_fd){
+			if(sock_fd == process_global->socket_fd){
 				child_pid = process_global->child_pid[child_index];
 				child_pipe = process_global->pipe_fd[child_index][0];
 				send(child_pipe,(char *) & data,sizeof(data) , 0);
@@ -285,7 +278,7 @@ int php_server_run_master_process(){
 /* 启动子进程  */
 int php_server_run_worker_process(){
 	
-	epoll_event events[MAX_EPOLL_NUMBER];
+	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,ret,sock_fd,conn_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
 	char data = '0';
 	struct sockaddr_in client;
@@ -309,7 +302,7 @@ int php_server_run_worker_process(){
 				}else{
 					//有新的连接到来
 					bzero(&client,client_len);
-					conn_fd = accept(process_global->sock_fd,(struct sockaddr *) & client, &client_len);
+					conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
 					if(conn_fd < 0){
 						PHP_SERVER_DEBUG("accept:%d\n",conn_fd);			
 						continue;
@@ -326,7 +319,7 @@ int php_server_run_worker_process(){
 
 /* 父子进程统一启动进程的函数*/
 void php_server_run(){
-	if(process_global.process_index == -1){
+	if(process_global->process_index == -1){
 		php_server_run_master_process();
 	}else{
 		php_server_run_worker_process();
@@ -347,6 +340,36 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
 	free(process_global);
 	return SUCCESS;
 }
+
+
+
+/* {{{ 测试模块是否正常加载
+ */
+PHP_FUNCTION(test_php_server){
+	int ret,process_number=7;
+
+	PHP_SERVER_DEBUG("function is ok !\n");
+
+	ret = php_server_setup_socket("127.0.0.1",9000);
+	PHP_SERVER_DEBUG("setup_socket:%d\n,ret");
+
+	ret = php_server_setup_process_pool(socket_fd_global,process_number);
+	PHP_SERVER_DEBUG("setup_process_pool:%d",ret);
+
+	php_server_run();
+	PHP_SERVER_DEBUG("server is running.\n");
+
+	ret = php_server_shutdown_process_pool(process_number);
+	PHP_SERVER_DEBUG("shutdown_process_pool:%d\n",ret);
+
+	ret = php_server_shutdown_socket();
+	PHP_SERVER_DEBUG("shutdown_socket:%d\n",ret);	
+			
+	RETURN_STRING("php-server");
+}
+/* }}} */
+
+
 
 
 /* {{{ PHP_MINIT_FUNCTION
