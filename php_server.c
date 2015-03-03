@@ -217,6 +217,7 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 				process_global->process_number = process_number;
 			}
 			process_global->process_index = -1;
+			process_global->child_pid[i] = pid;
 			close(process_global->pipe_fd[i][1]);
 			continue;
 		}else if(0 == pid){
@@ -245,6 +246,7 @@ void php_server_sig_handler(int signal_no){
 			case SIGCHLD:
 			if((pid = waitpid(-1,NULL,WNOHANG)) > 0){
 				for(i=0; i<process_global->process_number; i++){
+					PHP_SERVER_DEBUG("%d ",process_global->child_pid[i]);
 					if(pid == process_global->child_pid[i]){
 						process_global->child_pid[i] = -1;
 						close(process_global->pipe_fd[i][0]);
@@ -482,10 +484,10 @@ PHP_FUNCTION(test_php_server){
 	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
 
 	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("server %d shutdown_process_pool:%d\n",process_global->process_index,ret);
+	PHP_SERVER_DEBUG("shutdown_process_pool:%d\n",ret);
 
 	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("server %d shutdown_socket:%d\n",process_global->process_index,ret);	
+	PHP_SERVER_DEBUG("shutdown_socket:%d\n",ret);	
 			
 	RETURN_STRING("php-server");
 }
