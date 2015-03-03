@@ -95,6 +95,13 @@ void php_server_epoll_add_read_fd(int epoll_fd,int fd){
 	php_server_set_nonblock(fd);
 }
 
+/* 把某个fd移除出epoll事件表*/
+void php_server_epoll_del_fd(int epoll_fd,int fd){
+	epoll_ctl(epoll_fd, EPOLL_CTL_DEL,fd,0);
+	close(fd);
+}
+
+
 /* 把fd从epool事件表中移除 */
 void php_server_epoll_remove_fd(int epoll_fd,int fd){
 	epoll_ctl(epoll_fd,EPOLL_CTL_DEL,fd,0);
@@ -204,6 +211,7 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 		pid = fork();
 
 		if(pid > 0){
+			PHP_SERVER_DEBUG("child %d is created\n",pid);
 			if(0 == i){
 				process_global->child_pid = (pid_t * ) malloc(sizeof(pid_t) * process_number);
 				process_global->process_number = process_number;
@@ -222,6 +230,56 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 
 	return SUCCESS;
 }
+/* 信号处理函数  */
+void php_server_sig_handler(int signal_no){
+	
+	static int killed_child = 0;
+	int i;
+	pid_t pid;	
+
+	PHP_SERVER_DEBUG("server %d get %d(%d:%d:%d)\n",process_global->process_index,signal_no,SIGCHLD,SIGTERM,SIGINT);
+
+	if(process_global->process_index == -1){
+		switch(signal_no){
+			/* 如果子进程退出，那么设置其pid为-1并关闭其管道  */
+			case SIGCHLD:
+			if((pid = waitpid(-1,NULL,WNOHANG)) > 0){
+				for(i=0; i<process_global->process_number; i++){
+					if(pid == process_global->child_pid[i]){
+						process_global->child_pid[i] = -1;
+						close(process_global->pipe_fd[i][0]);
+						PHP_SERVER_DEBUG("child %d:%d out\n",pid,i);
+						killed_child++;
+						break;
+					}
+				}
+			}
+			/* 当退出的进程数量达到子进程的总量，那么父进程也紧跟着退出 */
+			if(killed_child == process_global->process_number){
+				process_global->is_stop = 1;
+			}
+			PHP_SERVER_DEBUG("pid %d get,killed child %d\n",pid,killed_child);
+			break;
+
+			case SIGTERM:
+			case SIGINT:
+			/* 向所有还存活的进程发送信号 */
+			for(i=0;i<process_global->process_number;i++){
+				if(-1 != process_global->child_pid[i]){
+					kill(process_global->child_pid[i],SIGTERM);
+				}
+			}
+			break;
+		}
+	}else{
+		switch(signal_no){
+			case SIGTERM:
+			case SIGINT:
+			process_global->is_stop = 1;
+			break;
+		}
+	}
+}
 
 /* 启动初始化函数 */
 zend_bool php_server_run_init(){
@@ -230,6 +288,10 @@ zend_bool php_server_run_init(){
 		return FAILURE;
 	}
 	process_global->is_stop = 0;
+	/*设置信号处理函数*/
+	signal(SIGCHLD,php_server_sig_handler);
+	signal(SIGTERM,php_server_sig_handler);
+	signal(SIGINT,php_server_sig_handler);
 	return SUCCESS;
 }
 
@@ -244,7 +306,7 @@ zend_bool php_server_clear_init(){
 int php_server_run_master_process(){
 		
 	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,number,sock_fd,child_index = 0,child_pid,child_pipe;
+	int i,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
 	char data = '1';
 
 	php_server_run_init();
@@ -252,16 +314,33 @@ int php_server_run_master_process(){
 	/* 父进程监听global_socket */
 	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd);
 
+	PHP_SERVER_DEBUG("master while\n");
+	
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
+		PHP_SERVER_DEBUG("epoll come in master:%d\n",number);
 		if(number<0 && errno != EINTR){
-			return	errno; 
+			break; 
 		}
 		
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
-			/*说明有的新的连接到来，那么选择一个进程处理这个连接*/
+				/*说明有的新的连接到来，那么轮询一个进程处理这个连接*/
 			if(sock_fd == process_global->socket_fd){
+				alive_child = process_global->process_number;
+				while(-1 == process_global->child_pid[child_index]){
+					child_index = (child_index+1)%process_global->process_number;
+					alive_child--;
+					if(0 == alive_child){
+						break;
+					}
+				}
+				/* 如果子进程存活量为0了，那么就kill自己,然后父进程会通知所有存在的子进程杀掉自己*/
+				if(alive_child == 0){
+					PHP_SERVER_DEBUG("child none, master start kill itself\n");
+					kill(getpid(),SIGTERM);
+					break;
+				}
 				child_pid = process_global->child_pid[child_index];
 				child_pipe = process_global->pipe_fd[child_index][0];
 				send(child_pipe,(char *) & data,sizeof(data) , 0);
@@ -271,9 +350,45 @@ int php_server_run_master_process(){
 	}
 	
 	php_server_clear_init();
-		
+	if(number<0){
+		return errno;
+	}
 	return 0;
 }
+
+/* 子进程循环读取消息 */
+#define BUFFER_SIZE 8096
+char recv_buffer[BUFFER_SIZE];
+
+char * php_server_recv_from_client(int sock_fd){
+	int ret;
+
+	bzero(recv_buffer,sizeof(recv_buffer));	
+
+	ret = recv(sock_fd,recv_buffer,sizeof(recv_buffer),0);
+
+	/* 说明读操作错误，那么不再监听这个连接 */
+	if(ret<0){
+		if(errno != EAGAIN){
+			php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);	
+		}
+		PHP_SERVER_DEBUG("worker recv error\n");
+		
+		return NULL;
+	}else if(ret == 0){
+		/* 说明客户端关闭了连接 */
+		php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
+		PHP_SERVER_DEBUG("client %d closed\n",sock_fd);
+
+		return NULL;
+	}else{
+		PHP_SERVER_DEBUG("%d recv from %d:%s\n",process_global->process_index,sock_fd,recv_buffer);
+
+		return recv_buffer;
+	}
+}
+
+
 
 /* 启动子进程  */
 int php_server_run_worker_process(){
@@ -303,12 +418,18 @@ int php_server_run_worker_process(){
 					//有新的连接到来
 					bzero(&client,client_len);
 					conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
+					
+					PHP_SERVER_DEBUG("worker %d accepted\n",process_global->process_index);
+					PHP_SERVER_DEBUG("accept sockfd in worker:%d\n",conn_fd);			
 					if(conn_fd < 0){
-						PHP_SERVER_DEBUG("accept:%d\n",conn_fd);			
 						continue;
 					}
 					php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd);
 				}
+			/*这里除开父进程发送的消息，就只有客户端的消息到来了*/
+			}else if(events[i].events & EPOLLIN){
+				
+				php_server_recv_from_client(sock_fd);
 			}
 		}	
 	}
@@ -351,19 +472,20 @@ PHP_FUNCTION(test_php_server){
 	PHP_SERVER_DEBUG("function is ok !\n");
 
 	ret = php_server_setup_socket("127.0.0.1",9000);
-	PHP_SERVER_DEBUG("setup_socket:%d\n,ret");
+	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
 
 	ret = php_server_setup_process_pool(socket_fd_global,process_number);
-	PHP_SERVER_DEBUG("setup_process_pool:%d",ret);
+	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
 
+	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
 	php_server_run();
-	PHP_SERVER_DEBUG("server is running.\n");
+	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
 
 	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("shutdown_process_pool:%d\n",ret);
+	PHP_SERVER_DEBUG("server %d shutdown_process_pool:%d\n",process_global->process_index,ret);
 
 	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("shutdown_socket:%d\n",ret);	
+	PHP_SERVER_DEBUG("server %d shutdown_socket:%d\n",process_global->process_index,ret);	
 			
 	RETURN_STRING("php-server");
 }
