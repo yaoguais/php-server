@@ -244,23 +244,28 @@ void php_server_sig_handler(int signal_no){
 		switch(signal_no){
 			/* 如果子进程退出，那么设置其pid为-1并关闭其管道  */
 			case SIGCHLD:
-			if((pid = waitpid(-1,NULL,WNOHANG)) > 0){
-				for(i=0; i<process_global->process_number; i++){
-					PHP_SERVER_DEBUG("%d ",process_global->child_pid[i]);
-					if(pid == process_global->child_pid[i]){
-						process_global->child_pid[i] = -1;
-						close(process_global->pipe_fd[i][0]);
-						PHP_SERVER_DEBUG("child %d:%d out\n",pid,i);
-						killed_child++;
-						break;
+			for(;;){
+				if((pid = waitpid(-1,NULL,WNOHANG)) > 0){
+					for(i=0; i<process_global->process_number; i++){
+						PHP_SERVER_DEBUG("%d ",process_global->child_pid[i]);
+						if(pid == process_global->child_pid[i]){
+							process_global->child_pid[i] = -1;
+							close(process_global->pipe_fd[i][0]);
+							PHP_SERVER_DEBUG("child %d:%d out\n",pid,i);
+							killed_child++;
+							break;
+						}
 					}
+				}else{
+					PHP_SERVER_DEBUG("sigchld break\n");
+					break;
 				}
+				/* 当退出的进程数量达到子进程的总量，那么父进程也紧跟着退出 */
+				if(killed_child == process_global->process_number){
+					process_global->is_stop = 1;
+				}
+				PHP_SERVER_DEBUG("pid %d get,killed child %d\n",pid,killed_child);
 			}
-			/* 当退出的进程数量达到子进程的总量，那么父进程也紧跟着退出 */
-			if(killed_child == process_global->process_number){
-				process_global->is_stop = 1;
-			}
-			PHP_SERVER_DEBUG("pid %d get,killed child %d\n",pid,killed_child);
 			break;
 
 			case SIGTERM:
