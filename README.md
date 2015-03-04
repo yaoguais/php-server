@@ -2,6 +2,11 @@
 
 这是一个可以作为TCP服务器的PHP扩展。
 
+1. 配置选项
+2. 类与函数
+3. 信号处理
+4. 压力测试
+
 配置项有：
 
 1. 进程池的大小process\_number
@@ -129,3 +134,15 @@
 杀死主进程后，主进程收到SIGTERM信号,然后主进程通知所有子进程退出。子进程全部退出后，主进程最后退出。
 
 ![向主进程发送终止信号](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/kill.png)
+
+
+ApacheBench：
+
+	VMware® Workstation : 10.0.1 build-1379776
+	内存					: 1GB
+	处理器				: 1
+	http content		: 0123456789
+
+经测试，10次中有8次在3000以上，有两次会急剧减低到800多。
+
+![ab](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/bench.png)
