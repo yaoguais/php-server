@@ -74,6 +74,11 @@ PHP_INI_END()
 
 //调试的宏
 #define PHP_SERVER_DEBUG printf
+//长度要加上最后的\0结束符
+#define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
+#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
+				     php_server_epoll_del_fd(process_global->epoll_fd,sockfd); \
+				     printf("manual close client %d\n",sockfd);
 
 /* 一些常用的函数  */
 
@@ -437,6 +442,7 @@ int php_server_run_worker_process(){
 			}else if(events[i].events & EPOLLIN){
 				
 				php_server_recv_from_client(sock_fd);
+				PHP_SERVER_HTTP_SEND(sock_fd);
 			}
 		}	
 	}
