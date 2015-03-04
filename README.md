@@ -115,3 +115,17 @@
 	function bind_close($remote){
 	
 	}
+
+
+信号处理：
+
+可以向master、worker发送SIGTERM或SIGINT信号终止该进程
+
+服务端首先启动进程池，监听客户连接的到来
+
+![服务端进程](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/server.png)
+
+
+杀死主进程后，主进程收到SIGTERM信号,然后主进程通知所有子进程退出。子进程全部退出后，主进程最后退出。
+
+![向主进程发送终止信号](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/kill.png)
