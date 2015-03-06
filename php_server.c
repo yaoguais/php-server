@@ -558,7 +558,7 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
 /* {{{ 测试模块是否正常加载
  */
 PHP_FUNCTION(test_php_server){
-	int ret,process_number=PHP_SERVER_G(process_number);
+/*	int ret,process_number=PHP_SERVER_G(process_number);
 
 	PHP_SERVER_DEBUG("function is ok !\n");
 
@@ -577,7 +577,7 @@ PHP_FUNCTION(test_php_server){
 
 	ret = php_server_shutdown_socket();
 	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
-
+*/
 	RETURN_STRING("php-server");
 }
 /* }}} */
@@ -587,11 +587,45 @@ PHP_FUNCTION(test_php_server){
  */
 static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
 {
-        php_server_globals->process_number = 0;
+    php_server_globals->process_number = 0;
 	php_server_globals->master_name = NULL;
 	php_server_globals->worker_name = NULL;
 }
 /* }}} */
+
+PHP_FUNCTION(php_server_create)
+{
+	if(ZEND_parse_parameters(ZEND_NUM_ARGS(), "sl" ,&PHP_SERVER_P(ip),&PHP_SERVER_P(ip_len),&PHP_SERVER_P(port)) == FAILURE){
+		return;
+	}
+}
+
+PHP_FUNCTION(php_server_run)
+{
+	int ret,process_number=PHP_SERVER_G(process_number);
+
+	if(PHP_SERVER_P(ip_len)==0){
+		return;
+	}
+
+	PHP_SERVER_DEBUG("function is ok !\n");
+
+	ret = php_server_setup_socket("127.0.0.1",9000);
+	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
+
+	ret = php_server_setup_process_pool(socket_fd_global,process_number);
+	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
+
+	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
+	php_server_run();
+	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
+
+	ret = php_server_shutdown_process_pool(process_number);
+	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
+
+	ret = php_server_shutdown_socket();
+	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());
+}
 
 
 /* {{{ PHP_MINIT_FUNCTION

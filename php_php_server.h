@@ -45,6 +45,16 @@ ZEND_BEGIN_MODULE_GLOBALS(php_server)
 	char * worker_name;
 ZEND_END_MODULE_GLOBALS(php_server)
 
+/*property declare*/
+typedef struct _php_server_property{
+	char * ip;
+	size_t ip_len;
+	int port;
+}php_server_property;
+
+struct php_server_property php_server_property_globals;
+
+#define PHP_SERVER_P(v) (php_server_property_globals.v)
 
 /* function declare*/
 PHP_FUNCTION(php_server_create);
