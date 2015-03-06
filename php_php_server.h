@@ -52,7 +52,7 @@ typedef struct _php_server_property{
 	int port;
 }php_server_property;
 
-struct php_server_property php_server_property_globals;
+php_server_property php_server_property_globals;
 
 #define PHP_SERVER_P(v) (php_server_property_globals.v)
 
