@@ -45,6 +45,16 @@ ZEND_BEGIN_MODULE_GLOBALS(php_server)
 	char * worker_name;
 ZEND_END_MODULE_GLOBALS(php_server)
 
+
+/* function declare*/
+PHP_FUNCTION(php_server_create);
+PHP_FUNCTION(php_server_bind);
+PHP_FUNCTION(php_server_send);
+PHP_FUNCTION(php_server_set);
+PHP_FUNCTION(php_server_get);
+PHP_FUNCTION(php_server_run);
+
+
 /* Always refer to the globals in your function as PHP_SERVER_G(variable).
    You are encouraged to rename these macros something shorter, see
    examples in any other php module directory.
