@@ -38,13 +38,12 @@ extern zend_module_entry php_server_module_entry;
 #include "TSRM.h"
 #endif
 
-/*
-  	Declare any global variables you may need between the BEGIN
-	and END macros here:
 
 ZEND_BEGIN_MODULE_GLOBALS(php_server)
+	int process_number;
+	char * master_name;
+	char * worker_name;
 ZEND_END_MODULE_GLOBALS(php_server)
-*/
 
 /* Always refer to the globals in your function as PHP_SERVER_G(variable).
    You are encouraged to rename these macros something shorter, see

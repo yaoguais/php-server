@@ -24,6 +24,8 @@
 
 #include "php.h"
 #include "php_ini.h"
+#include "php_globals.h"
+#include "php_main.h"
 #include "ext/standard/info.h"
 #include "php_php_server.h"
 
@@ -45,19 +47,19 @@
 #include <sys/stat.h>
 #include <malloc.h>
 
-/* If you declare any globals in php_php_server.h uncomment this:
 ZEND_DECLARE_MODULE_GLOBALS(php_server)
-*/
+//struct zend_php_server_globals php_server_globals;
 
 /* True global resources - no need for thread safety here */
 static int le_php_server;
 
 /* {{{ PHP_INI
  */
-/* Remove comments and fill if you need to have entries in php.ini
 PHP_INI_BEGIN()
+	STD_PHP_INI_ENTRY("php_server.process_number", "7", PHP_INI_ALL, OnUpdateLong, process_number, zend_php_server_globals, php_server_globals)
+	STD_PHP_INI_ENTRY("php_server.master_name", "php server master", PHP_INI_ALL, OnUpdateString, master_name, zend_php_server_globals, php_server_globals)
+	STD_PHP_INI_ENTRY("php_server.worker_name", "php server worker", PHP_INI_ALL, OnUpdateString, worker_name, zend_php_server_globals, php_server_globals)
 PHP_INI_END()
-*/
 /* }}} */
 
 
@@ -72,6 +74,12 @@ PHP_INI_END()
 //epoll最多能够的处理的事件的数量
 #define MAX_EPOLL_NUMBER 10000
 
+
+//父子管道通讯的数据
+#define PHP_SERVER_DATA_INIT '0'
+#define PHP_SERVER_DATA_CONN '1'
+#define PHP_SERVER_DATA_KILL '9'
+
 //调试的宏
 #define PHP_SERVER_DEBUG printf
 //长度要加上最后的\0结束符
@@ -81,6 +89,53 @@ PHP_INI_END()
 				     printf("manual close client %d\n",sockfd);
 
 /* 一些常用的函数  */
+
+/* 修改进程的显示名称 */
+
+extern char ** environ;
+
+void php_server_set_proc_name(int argc,char ** argv,char * name){
+
+	size_t size = 0;
+	char * last,*p;
+	int i,len;
+	/* 加上最后的字符串结束符 */
+	for(i=0;environ[i];i++){
+		size += strlen(environ[i]) + 1;
+	}
+	char * newEnviron = (char * ) malloc(size);
+	for(i=0;environ[i];i++){
+		len = strlen(environ[i]) + 1;
+		memcpy(newEnviron,environ[i],len);
+		environ[i] =  newEnviron;
+		newEnviron += len;
+	}
+	last = argv[0];
+	for(i=0;i<argc;i++){
+		last += strlen(argv[i]) + 1;
+	}
+	last += size;
+	argv[1] = 0;
+	p = argv[0];
+	len = last - p;
+	memset(p,0,len);
+	strncpy(p,name,len);
+}
+
+/*直接设置php的标题的名称*/
+
+void php_set_proc_name(char * name){
+	zval argv[1];
+	zval retval;
+	zval function_name;
+	ZVAL_STRING(&function_name,"cli_set_process_title");
+	ZVAL_STRING(&argv[0],name);
+	if(call_user_function(EG(function_table),NULL,&function_name,&retval,1,argv) == FAILURE){
+		php_error_docref(NULL, E_WARNING, "Could not call the cli_set_process_name");
+	}
+	zval_ptr_dtor(&argv[0]);
+	zval_ptr_dtor(&function_name);
+}
 
 /* 设置文件描述符为非阻塞  */
 int php_server_set_nonblock(int fd){
@@ -195,6 +250,10 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 
 	process_global->pipe_fd = (int **)malloc(sizeof(int * ) * process_number);
 
+	for(i=0; i<process_number;i++){
+		process_global->pipe_fd[i] = (int *) malloc(sizeof(int) * 2);		
+	}	
+
 	process_global->socket_fd = socket_fd;
 
 	process_global->process_number = 0;
@@ -205,8 +264,6 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 
 		process_global->socket_fd = socket_fd_global;
 		
-		process_global->pipe_fd[i] = (int *) malloc(sizeof(int) * 2);		
-
 		ret = socketpair(PF_UNIX,	SOCK_STREAM,	0,process_global->pipe_fd[i]);
 
 		if(ret!=0){
@@ -218,6 +275,8 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 		if(pid > 0){
 			PHP_SERVER_DEBUG("child %d is created\n",pid);
 			if(0 == i){
+				//php_set_proc_name("php server master");
+				php_set_proc_name(PHP_SERVER_G(master_name));
 				process_global->child_pid = (pid_t * ) malloc(sizeof(pid_t) * process_number);
 				process_global->process_number = process_number;
 			}
@@ -226,6 +285,8 @@ zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_numb
 			close(process_global->pipe_fd[i][1]);
 			continue;
 		}else if(0 == pid){
+			//php_set_proc_name("php server worker");
+			php_set_proc_name(PHP_SERVER_G(worker_name));
 			process_global->process_index = i;
 			close(process_global->pipe_fd[i][0]);
 			break;
@@ -242,6 +303,7 @@ void php_server_sig_handler(int signal_no){
 	static int killed_child = 0;
 	int i;
 	pid_t pid;	
+	char data = PHP_SERVER_DATA_KILL;
 
 	PHP_SERVER_DEBUG("server %d get %d(%d:%d:%d)\n",process_global->process_index,signal_no,SIGCHLD,SIGTERM,SIGINT);
 
@@ -278,7 +340,8 @@ void php_server_sig_handler(int signal_no){
 			/* 向所有还存活的进程发送信号 */
 			for(i=0;i<process_global->process_number;i++){
 				if(-1 != process_global->child_pid[i]){
-					kill(process_global->child_pid[i],SIGTERM);
+					//kill(process_global->child_pid[i],SIGTERM);
+					send(process_global->pipe_fd[i][0],(char *) &data,sizeof(data),0);
 				}
 			}
 			break;
@@ -319,7 +382,7 @@ int php_server_run_master_process(){
 		
 	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
-	char data = '1';
+	char data = PHP_SERVER_DATA_CONN;
 
 	php_server_run_init();
 	
@@ -330,7 +393,7 @@ int php_server_run_master_process(){
 	
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in master:%d\n",number);
+		PHP_SERVER_DEBUG("epoll come in master:%d break:%d\n",number,number<0 && errno!=EINTR);
 		if(number<0 && errno != EINTR){
 			break; 
 		}
@@ -350,7 +413,17 @@ int php_server_run_master_process(){
 				/* 如果子进程存活量为0了，那么就kill自己,然后父进程会通知所有存在的子进程杀掉自己*/
 				if(alive_child == 0){
 					PHP_SERVER_DEBUG("child none, master start kill itself\n");
-					kill(getpid(),SIGTERM);
+					//kill(getpid(),SIGTERM);
+					
+					/* 向所有还存活的进程发送信号 */
+					int j;
+					char data = PHP_SERVER_DATA_KILL;
+					for(j=0;j<process_global->process_number;j++){
+						if(-1 != process_global->child_pid[j]){
+							//kill(process_global->child_pid[i],SIGTERM);
+							send(process_global->pipe_fd[j][0],(char *) &data,sizeof(data),0);
+						}
+					}
 					break;
 				}
 				child_pid = process_global->child_pid[child_index];
@@ -407,7 +480,7 @@ int php_server_run_worker_process(){
 	
 	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,ret,sock_fd,conn_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
-	char data = '0';
+	char data = PHP_SERVER_DATA_INIT;
 	struct sockaddr_in client;
 	socklen_t client_len = sizeof(client);
 	php_server_run_init();
@@ -427,16 +500,21 @@ int php_server_run_worker_process(){
 				if( ( ret < 0 && errno != EAGAIN) || ret == 0 ){
 					continue;
 				}else{
-					//有新的连接到来
-					bzero(&client,client_len);
-					conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
+					if(data==PHP_SERVER_DATA_CONN){
+						//有新的连接到来
+						bzero(&client,client_len);
+						conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
 					
-					PHP_SERVER_DEBUG("worker %d accepted\n",process_global->process_index);
-					PHP_SERVER_DEBUG("accept sockfd in worker:%d\n",conn_fd);			
-					if(conn_fd < 0){
-						continue;
+						PHP_SERVER_DEBUG("worker %d accepted\n",process_global->process_index);
+						PHP_SERVER_DEBUG("accept sockfd in worker:%d\n",conn_fd);			
+						if(conn_fd < 0){
+							continue;
+						}
+						php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd);
+					}else if(data==PHP_SERVER_DATA_KILL){
+						process_global->is_stop = 1;
+						break;
 					}
-					php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd);
 				}
 			/*这里除开父进程发送的消息，就只有客户端的消息到来了*/
 			}else if(events[i].events & EPOLLIN){
@@ -480,7 +558,7 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
 /* {{{ 测试模块是否正常加载
  */
 PHP_FUNCTION(test_php_server){
-	int ret,process_number=7;
+	int ret,process_number=PHP_SERVER_G(process_number);
 
 	PHP_SERVER_DEBUG("function is ok !\n");
 
@@ -495,25 +573,33 @@ PHP_FUNCTION(test_php_server){
 	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
 
 	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("shutdown_process_pool:%d\n",ret);
+	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
 
 	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("shutdown_socket:%d\n",ret);	
-			
+	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
+
 	RETURN_STRING("php-server");
 }
 /* }}} */
 
 
+/* {{{ php_php_server_init_globals
+ */
+static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
+{
+        php_server_globals->process_number = 0;
+	php_server_globals->master_name = NULL;
+	php_server_globals->worker_name = NULL;
+}
+/* }}} */
 
 
 /* {{{ PHP_MINIT_FUNCTION
  */
 PHP_MINIT_FUNCTION(php_server)
 {
-	/* If you have INI entries, uncomment these lines
 	REGISTER_INI_ENTRIES();
-	*/
+
 	return SUCCESS;
 }
 /* }}} */
@@ -522,9 +608,8 @@ PHP_MINIT_FUNCTION(php_server)
  */
 PHP_MSHUTDOWN_FUNCTION(php_server)
 {
-	/* uncomment this line if you have INI entries
 	UNREGISTER_INI_ENTRIES();
-	*/
+
 	return SUCCESS;
 }
 /* }}} */
@@ -558,9 +643,7 @@ PHP_MINFO_FUNCTION(php_server)
 	php_info_print_table_header(2, "php_server support", "enabled");
 	php_info_print_table_end();
 
-	/* Remove comments if you have entries in php.ini
 	DISPLAY_INI_ENTRIES();
-	*/
 }
 /* }}} */
 
