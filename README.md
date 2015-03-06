@@ -4,6 +4,7 @@
 
 1. 配置选项
 2. 类与函数
+3. 安装扩展
 3. 信号处理
 4. 压力测试
 
@@ -26,7 +27,7 @@
 	     * 架构函数
 	     * @param string $ip IP地址
 	     * @param int $port 端口
-	     * function php_server_construct
+	     * function php_server_create
 	     */
 	    public function __construct($ip,$port){
 	
@@ -122,6 +123,17 @@
 	}
 
 
+安装扩展：
+
+	phpize
+	./configure
+	make && make install
+	
+	编辑php.ini并添加
+	extension = php_server.so
+	
+	执行php php_server.php即可启动服务器
+
 信号处理：
 
 可以向master、worker发送SIGTERM或SIGINT信号终止该进程
@@ -139,6 +151,8 @@
 ApacheBench：
 
 	VMware® Workstation : 10.0.1 build-1379776
+	PHP Version			: 7.0.0-dev
+	Linux version		: 2.6.32-504.1.3.el6.x86_64 (gcc version 4.4.7 20120313 (Red Hat 4.4.7-11) (GCC) )
 	内存					: 1GB
 	处理器				: 1
 	http content		: 0123456789
