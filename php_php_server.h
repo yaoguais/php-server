@@ -45,16 +45,28 @@ ZEND_BEGIN_MODULE_GLOBALS(php_server)
 	char * worker_name;
 ZEND_END_MODULE_GLOBALS(php_server)
 
-/*property declare*/
-typedef struct _php_server_property{
-	char * ip;
-	size_t ip_len;
-	int port;
-}php_server_property;
 
-php_server_property php_server_property_globals;
+/* 定义存储进程信息的结构体 */
+typedef struct php_server_process{
+	//当前子进程的数量
+	unsigned int	process_number;		
+	//当前进程的序号,父进程为-1,子进程从0开始
+	int		process_index;
+	//子进程的PID
+	pid_t * child_pid;
+	//epoll事件表标识
+	int epoll_fd;
+	//整个应用监听的sokect
+	int socket_fd;
+	//当前进程是否停止运行
+	zend_bool is_stop;
+	//用作进程间通讯的双端管道
+	int ** pipe_fd;	
+}server_process;
 
-#define PHP_SERVER_P(v) (php_server_property_globals.v)
+
+
+
 
 /* function declare*/
 PHP_FUNCTION(php_server_create);
@@ -63,6 +75,23 @@ PHP_FUNCTION(php_server_send);
 PHP_FUNCTION(php_server_set);
 PHP_FUNCTION(php_server_get);
 PHP_FUNCTION(php_server_run);
+void php_server_set_proc_name(int argc,char ** argv,char * name);
+void php_set_proc_name(char * name);
+int php_server_set_nonblock(int fd);
+void php_server_epoll_add_read_fd(int epoll_fd,int fd);
+void php_server_epoll_del_fd(int epoll_fd,int fd);
+void php_server_epoll_remove_fd(int epoll_fd,int fd);
+zend_bool php_server_setup_socket(char * ip,int port);
+zend_bool php_server_shutdown_socket();
+zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_number);
+void php_server_sig_handler(int signal_no);
+zend_bool php_server_run_init();
+zend_bool php_server_clear_init();
+int php_server_run_master_process();
+char * php_server_recv_from_client(int sock_fd);
+int php_server_run_worker_process();
+void php_server_run();
+zend_bool php_server_shutdown_process_pool(unsigned int process_number);
 
 
 /* Always refer to the globals in your function as PHP_SERVER_G(variable).

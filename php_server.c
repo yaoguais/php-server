@@ -81,18 +81,120 @@ PHP_INI_END()
 #define PHP_SERVER_DATA_KILL '9'
 
 //调试的宏
-#define PHP_SERVER_DEBUG printf
+#define PHP_SERVER_DEBUG //
 //长度要加上最后的\0结束符
 #define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
-#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
-				     php_server_epoll_del_fd(process_global->epoll_fd,sockfd); \
-				     printf("manual close client %d\n",sockfd);
+#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); 
+//									 php_server_epoll_del_fd(process_global->epoll_fd,sockfd); 
+//									 printf("manual close client %d\n",sockfd);
+
+#define BUFFER_SIZE 8096
+char recv_buffer[BUFFER_SIZE];
+
+
+/* 监听的socket_fd  */
+int socket_fd_global;
+
+extern char ** environ;
+
+server_process *  process_global;
+
+
+
+/* {{{ 测试模块是否正常加载
+ */
+PHP_FUNCTION(test_php_server){
+	int ret,process_number=PHP_SERVER_G(process_number);
+
+	PHP_SERVER_DEBUG("function is ok !\n");
+
+	ret = php_server_setup_socket("127.0.0.1",9000);
+	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
+
+	ret = php_server_setup_process_pool(socket_fd_global,process_number);
+	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
+
+	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
+	php_server_run();
+	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
+
+	ret = php_server_shutdown_process_pool(process_number);
+	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
+
+	ret = php_server_shutdown_socket();
+	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
+
+	RETURN_STRING("php-server");
+}
+/* }}} */
+
+
+/* {{{ php_php_server_init_globals
+ */
+static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
+{
+    php_server_globals->process_number = 0;
+	php_server_globals->master_name = NULL;
+	php_server_globals->worker_name = NULL;
+}
+/* }}} */
+
+/* {{{ PHP_MINIT_FUNCTION
+ */
+PHP_MINIT_FUNCTION(php_server)
+{
+	REGISTER_INI_ENTRIES();
+
+	return SUCCESS;
+}
+/* }}} */
+
+/* {{{ PHP_MSHUTDOWN_FUNCTION
+ */
+PHP_MSHUTDOWN_FUNCTION(php_server)
+{
+	UNREGISTER_INI_ENTRIES();
+
+	return SUCCESS;
+}
+/* }}} */
+
+/* Remove if there's nothing to do at request start */
+/* {{{ PHP_RINIT_FUNCTION
+ */
+PHP_RINIT_FUNCTION(php_server)
+{
+#if defined(COMPILE_DL_PHP_SERVER) && defined(ZTS)
+	ZEND_TSRMLS_CACHE_UPDATE;
+#endif
+	return SUCCESS;
+}
+/* }}} */
+
+/* Remove if there's nothing to do at request end */
+/* {{{ PHP_RSHUTDOWN_FUNCTION
+ */
+PHP_RSHUTDOWN_FUNCTION(php_server)
+{
+	return SUCCESS;
+}
+/* }}} */
+
+/* {{{ PHP_MINFO_FUNCTION
+ */
+PHP_MINFO_FUNCTION(php_server)
+{
+	php_info_print_table_start();
+	php_info_print_table_header(2, "php_server support", "enabled");
+	php_info_print_table_end();
+
+	DISPLAY_INI_ENTRIES();
+}
+/* }}} */
 
 /* 一些常用的函数  */
 
 /* 修改进程的显示名称 */
-
-extern char ** environ;
 
 void php_server_set_proc_name(int argc,char ** argv,char * name){
 
@@ -167,37 +269,6 @@ void php_server_epoll_remove_fd(int epoll_fd,int fd){
 	epoll_ctl(epoll_fd,EPOLL_CTL_DEL,fd,0);
 	close(fd);
 }
-
-
-/* 定义存储进程信息的结构体 */
-typedef struct php_server_process{
-	//当前子进程的数量
-	unsigned int	process_number;
-		
-	//当前进程的序号,父进程为-1,子进程从0开始
-	int		process_index;
-
-	//子进程的PID
-	pid_t * child_pid;
-
-	//epoll事件表标识
-	int epoll_fd;
-
-	//整个应用监听的sokect
-	int socket_fd;
-
-	//当前进程是否停止运行
-	zend_bool is_stop;
-
-	//用作进程间通讯的双端管道
-	int ** pipe_fd;	
-}server_process;
-
-server_process *  process_global;
-
-
-/* 监听的socket_fd  */
-int socket_fd_global;
 
 zend_bool php_server_setup_socket(char * ip,int port){
 	
@@ -442,8 +513,6 @@ int php_server_run_master_process(){
 }
 
 /* 子进程循环读取消息 */
-#define BUFFER_SIZE 8096
-char recv_buffer[BUFFER_SIZE];
 
 char * php_server_recv_from_client(int sock_fd){
 	int ret;
@@ -552,135 +621,6 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
 	free(process_global);
 	return SUCCESS;
 }
-
-
-
-/* {{{ 测试模块是否正常加载
- */
-PHP_FUNCTION(test_php_server){
-/*	int ret,process_number=PHP_SERVER_G(process_number);
-
-	PHP_SERVER_DEBUG("function is ok !\n");
-
-	ret = php_server_setup_socket("127.0.0.1",9000);
-	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
-
-	ret = php_server_setup_process_pool(socket_fd_global,process_number);
-	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
-
-	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
-	php_server_run();
-	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
-
-	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
-
-	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
-*/
-	RETURN_STRING("php-server");
-}
-/* }}} */
-
-
-/* {{{ php_php_server_init_globals
- */
-static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
-{
-    php_server_globals->process_number = 0;
-	php_server_globals->master_name = NULL;
-	php_server_globals->worker_name = NULL;
-}
-/* }}} */
-
-PHP_FUNCTION(php_server_create)
-{
-	if(ZEND_parse_parameters(ZEND_NUM_ARGS(), "sl" ,&PHP_SERVER_P(ip),&PHP_SERVER_P(ip_len),&PHP_SERVER_P(port)) == FAILURE){
-		return;
-	}
-}
-
-PHP_FUNCTION(php_server_run)
-{
-	int ret,process_number=PHP_SERVER_G(process_number);
-
-	if(PHP_SERVER_P(ip_len)==0){
-		return;
-	}
-
-	PHP_SERVER_DEBUG("function is ok !\n");
-
-	ret = php_server_setup_socket("127.0.0.1",9000);
-	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
-
-	ret = php_server_setup_process_pool(socket_fd_global,process_number);
-	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
-
-	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
-	php_server_run();
-	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
-
-	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
-
-	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());
-}
-
-
-/* {{{ PHP_MINIT_FUNCTION
- */
-PHP_MINIT_FUNCTION(php_server)
-{
-	REGISTER_INI_ENTRIES();
-
-	return SUCCESS;
-}
-/* }}} */
-
-/* {{{ PHP_MSHUTDOWN_FUNCTION
- */
-PHP_MSHUTDOWN_FUNCTION(php_server)
-{
-	UNREGISTER_INI_ENTRIES();
-
-	return SUCCESS;
-}
-/* }}} */
-
-/* Remove if there's nothing to do at request start */
-/* {{{ PHP_RINIT_FUNCTION
- */
-PHP_RINIT_FUNCTION(php_server)
-{
-#if defined(COMPILE_DL_PHP_SERVER) && defined(ZTS)
-	ZEND_TSRMLS_CACHE_UPDATE;
-#endif
-	return SUCCESS;
-}
-/* }}} */
-
-/* Remove if there's nothing to do at request end */
-/* {{{ PHP_RSHUTDOWN_FUNCTION
- */
-PHP_RSHUTDOWN_FUNCTION(php_server)
-{
-	return SUCCESS;
-}
-/* }}} */
-
-/* {{{ PHP_MINFO_FUNCTION
- */
-PHP_MINFO_FUNCTION(php_server)
-{
-	php_info_print_table_start();
-	php_info_print_table_header(2, "php_server support", "enabled");
-	php_info_print_table_end();
-
-	DISPLAY_INI_ENTRIES();
-}
-/* }}} */
-
 /* {{{ php_server_functions[]
  *
  * Every user visible function must have an entry in php_server_functions[].
