@@ -14,7 +14,7 @@ function bind_receive($fd,$message,$ip,$port){
 	//$message = rtrim($message,"\r\n");
 	//echo "receive $fd $message $ip $port ]\n";
 	echo $message;
-	php_server_send($fd,"HTTP1.0 200 OK\r\nServer: php_server 1.0\r\nConnection: Keep-Alive\r\nContent-Length: 11\r\n\r\n0123456789");
+	php_server_send($fd,"HTTP/1.1 200 OK\r\nServer: php_server 1.0\r\nConnection: Keep-Alive\r\nContent-Length: 11\r\n\r\n0123456789");
 }
 
 $server->bind('receive','bind_receive');
