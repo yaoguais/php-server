@@ -659,7 +659,7 @@ int php_server_run_master_process(){
 
 /* 子进程循环读取消息 */
 
-char * php_server_recv_from_client(int sock_fd){
+int php_server_recv_from_client(int sock_fd){
 	int ret;
 
 	bzero(recv_buffer,sizeof(recv_buffer));	
@@ -673,7 +673,6 @@ char * php_server_recv_from_client(int sock_fd){
 		}
 		PHP_SERVER_DEBUG("worker recv error\n");
 
-		return NULL;
 	}else if(ret == 0){
 		/* 说明客户端关闭了连接 */
 
@@ -701,7 +700,6 @@ char * php_server_recv_from_client(int sock_fd){
 
 		php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
 		//PHP_SERVER_DEBUG("client %d closed\n",sock_fd);
-		return NULL;
 	}else{
 		//PHP_SERVER_DEBUG("%d recv from %d:%s\n",process_global->process_index,sock_fd,recv_buffer);
 		/* callback receive */
@@ -727,8 +725,8 @@ char * php_server_recv_from_client(int sock_fd){
 			zval_dtor(&args[3]);
 		}
 		/* callback receive end */
-		return recv_buffer;
 	}
+	return ret;
 }
 
 
@@ -796,7 +794,6 @@ int php_server_run_worker_process(){
 			}else if(events[i].events & EPOLLIN){
 				
 				php_server_recv_from_client(sock_fd);
-				PHP_SERVER_HTTP_SEND(sock_fd);
 			}
 		}	
 	}

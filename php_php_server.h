@@ -84,7 +84,7 @@ void php_server_sig_handler(int signal_no);
 zend_bool php_server_run_init();
 zend_bool php_server_clear_init();
 int php_server_run_master_process();
-char * php_server_recv_from_client(int sock_fd);
+int php_server_recv_from_client(int sock_fd);
 int php_server_run_worker_process();
 void php_server_run();
 zend_bool php_server_shutdown_process_pool(unsigned int process_number);
