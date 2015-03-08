@@ -81,12 +81,12 @@ PHP_INI_END()
 #define PHP_SERVER_DATA_KILL '9'
 
 //调试的宏
-#define PHP_SERVER_DEBUG //
+#define PHP_SERVER_DEBUG printf
 //长度要加上最后的\0结束符
 #define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
-#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); 
-//									 php_server_epoll_del_fd(process_global->epoll_fd,sockfd); 
-//									 printf("manual close client %d\n",sockfd);
+#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
+									 php_server_epoll_del_fd(process_global->epoll_fd,sockfd); \
+									 printf("manual close client %d\n",sockfd);
 
 #define BUFFER_SIZE 8096
 char recv_buffer[BUFFER_SIZE];
@@ -99,7 +99,44 @@ extern char ** environ;
 
 server_process *  process_global;
 
+static zend_class_entry * php_server_class_entry;
 
+
+/*
+	argsinfo
+*/
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_create, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0,ip,IS_STRING,0)
+	ZEND_ARG_TYPE_INFO(0,port,IS_LONG,0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_bind, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0,event,IS_STRING,0)
+	ZEND_ARG_INFO(0,callback)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_send, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0,message,IS_STRING,0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_set, 0, 0, 2)
+	ZEND_ARG_TYPE_INFO(0,key,IS_STRING,0)
+	ZEND_ARG_INFO(0,value)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0,key,IS_STRING,0)
+ZEND_END_ARG_INFO()
+
+const zend_function_entry php_server_class_functions[] = {
+		PHP_FE(php_server_create,arginfo_php_server_create)
+		PHP_FE(php_server_bind,arginfo_php_server_bind)
+		PHP_FE(php_server_send,arginfo_php_server_send)
+		PHP_FE(php_server_set,arginfo_php_server_set)
+		PHP_FE(php_server_get,arginfo_php_server_get)
+		PHP_FE(php_server_run,NULL)
+		{NULL, NULL, NULL, 0 ,0}
+};
 
 /* {{{ 测试模块是否正常加载
  */
@@ -127,7 +164,29 @@ PHP_FUNCTION(test_php_server){
 	RETURN_STRING("php-server");
 }
 /* }}} */
+PHP_FUNCTION(php_server_create)
+{
 
+}
+PHP_FUNCTION(php_server_bind)
+{
+
+}
+PHP_FUNCTION(php_server_send)
+{
+
+}
+PHP_FUNCTION(php_server_set)
+{
+
+}
+PHP_FUNCTION(php_server_get)
+{
+
+}
+PHP_FUNCTION(php_server_run){
+
+}
 
 /* {{{ php_php_server_init_globals
  */
@@ -145,6 +204,11 @@ PHP_MINIT_FUNCTION(php_server)
 {
 	REGISTER_INI_ENTRIES();
 
+	zend_class_entry ce;
+	INIT_CLASS_ENTRY(ce,"php_server",php_server_class_functions);
+	php_server_class_entry = zend_register_internal_class(&ce);
+	/* MUST CHANGE TO ZEND_ACC_PRIVATE */
+	zend_declare_property_null(php_server_class_entry,"_settings",sizeof("_settings")-1,ZEND_ACC_PUBLIC);
 	return SUCCESS;
 }
 /* }}} */

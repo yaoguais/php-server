@@ -64,10 +64,6 @@ typedef struct php_server_process{
 	int ** pipe_fd;	
 }server_process;
 
-
-
-
-
 /* function declare*/
 PHP_FUNCTION(php_server_create);
 PHP_FUNCTION(php_server_bind);
