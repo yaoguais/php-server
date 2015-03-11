@@ -21,7 +21,7 @@
 	    /**
 	     * @var array 当前的配置
 	     */
-	    private $settings = array();
+	    private $_settings = array();
 	
 	    /**
 	     * 架构函数
@@ -31,8 +31,8 @@
 	     */
 	    public function __construct($ip,$port){
 	
-	        $this->settings['ip'] = $ip;
-	        $this->settings['port'] = $port;
+	        $this->_settings['ip'] = $ip;
+	        $this->_settings['port'] = $port;
 	    }
 	
 	    /**
@@ -66,7 +66,7 @@
 	     */
 	    public function set($key,$value){
 	
-	        $this->settings[$key] = $value;
+	        $this->_settings[$key] = $value;
 	    }
 	
 	    /**
@@ -77,7 +77,7 @@
 	     */
 	    public function get($key){
 	
-	        return is_string($key) ? $this->settings[$key] : $this->settings;
+	        return is_string($key) ? $this->_settings[$key] : $this->_settings;
 	    }
 	
 	
