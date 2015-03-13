@@ -110,30 +110,30 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_create, 0, 0, 2)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_bind, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0,event,IS_STRING,0)
+	ZEND_ARG_INFO(0,event)
 	ZEND_ARG_INFO(0,callback)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_send, 0, 0, 1)
-	ZEND_ARG_TYPE_INFO(0,message,IS_STRING,0)
+	ZEND_ARG_INFO(0,message)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_set, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0,key,IS_STRING,0)
+	ZEND_ARG_INFO(0,key)
 	ZEND_ARG_INFO(0,value)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 1)
-	ZEND_ARG_TYPE_INFO(0,key,IS_STRING,0)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 0)
+	ZEND_ARG_INFO(0,key)
 ZEND_END_ARG_INFO()
 
 const zend_function_entry php_server_class_functions[] = {
 		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
-		PHP_FE(php_server_bind,arginfo_php_server_bind)
-		PHP_FE(php_server_send,arginfo_php_server_send)
-		PHP_FE(php_server_set,arginfo_php_server_set)
-		PHP_FE(php_server_get,arginfo_php_server_get)
-		PHP_FE(php_server_run,NULL)
+		ZEND_FENTRY(bind,PHP_FN(php_server_bind),arginfo_php_server_bind,ZEND_ACC_PUBLIC)
+		ZEND_FENTRY(send,PHP_FN(php_server_send),arginfo_php_server_send,ZEND_ACC_PUBLIC)
+		ZEND_FENTRY(set,PHP_FN(php_server_set),arginfo_php_server_set,ZEND_ACC_PUBLIC)
+		ZEND_FENTRY(get,PHP_FN(php_server_get),arginfo_php_server_get,ZEND_ACC_PUBLIC)
+		ZEND_FENTRY(run,PHP_FN(php_server_run),NULL,ZEND_ACC_PUBLIC)
 		PHP_FE_END
 };
 
@@ -186,11 +186,29 @@ PHP_FUNCTION(php_server_send)
 }
 PHP_FUNCTION(php_server_set)
 {
-
+	char * key_str = NULL;
+	int key_len;
+	zval *value;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"s",&key_str,&key_len) == FAILURE){
+		return;
+	}else{
+		zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
+		//zend_hash_str_update(Z_ARRVAL_P(this_settings),key_str,key_len,value);
+	}
 }
 PHP_FUNCTION(php_server_get)
 {
-
+	char * key = NULL;
+	int key_len;
+	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
+	if(1!= ZEND_NUM_ARGS() || zend_parse_parameters(ZEND_NUM_ARGS(),"s",&key,&key_len) == FAILURE){
+		RETURN_ZVAL(this_settings,1,NULL);
+	}else{
+		zval * retval = zend_hash_str_find(Z_ARRVAL_P(this_settings),key,key_len);
+		if(retval){
+			RETURN_ZVAL(retval,1,NULL);
+		}
+	}
 }
 PHP_FUNCTION(php_server_run){
 
