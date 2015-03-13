@@ -101,13 +101,12 @@ server_process *  process_global;
 
 static zend_class_entry * php_server_class_entry;
 
-
 /*
 	argsinfo
 */
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_create, 0, 0, 2)
-	ZEND_ARG_TYPE_INFO(0,ip,IS_STRING,0)
-	ZEND_ARG_TYPE_INFO(0,port,IS_LONG,0)
+	ZEND_ARG_INFO(0,ip)
+	ZEND_ARG_INFO(0,port)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_bind, 0, 0, 2)
@@ -129,13 +128,13 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 1)
 ZEND_END_ARG_INFO()
 
 const zend_function_entry php_server_class_functions[] = {
-		PHP_FE(php_server_create,arginfo_php_server_create)
+		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
 		PHP_FE(php_server_bind,arginfo_php_server_bind)
 		PHP_FE(php_server_send,arginfo_php_server_send)
 		PHP_FE(php_server_set,arginfo_php_server_set)
 		PHP_FE(php_server_get,arginfo_php_server_get)
 		PHP_FE(php_server_run,NULL)
-		{NULL, NULL, NULL, 0 ,0}
+		PHP_FE_END
 };
 
 /* {{{ 测试模块是否正常加载
@@ -166,7 +165,16 @@ PHP_FUNCTION(test_php_server){
 /* }}} */
 PHP_FUNCTION(php_server_create)
 {
-
+	char * ip;
+	long ip_len,port;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"sl",&ip,&ip_len,&port) == FAILURE){
+		return;
+	}
+	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
+	array_init(this_settings);
+	add_assoc_stringl_ex(this_settings,"ip",sizeof("ip")-1,ip,ip_len);
+	add_assoc_long_ex(this_settings,"port",sizeof("port")-1,port);
+	zend_update_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,this_settings);
 }
 PHP_FUNCTION(php_server_bind)
 {
