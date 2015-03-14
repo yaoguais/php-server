@@ -6,6 +6,6 @@ var_dump($obj->get());
 
 var_dump($obj->get('port'));
 
-var_dump($obj->set('ip','127.0.0.1'));
+$obj->set('ip','127.0.0.1');
 
 var_dump($obj->get('ip'));

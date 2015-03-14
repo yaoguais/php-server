@@ -83,10 +83,11 @@ PHP_INI_END()
 //调试的宏
 #define PHP_SERVER_DEBUG printf
 //长度要加上最后的\0结束符
-#define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
-#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
+//#define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
+//#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
 									 php_server_epoll_del_fd(process_global->epoll_fd,sockfd); \
 									 printf("manual close client %d\n",sockfd);
+#define PHP_SERVER_HTTP_SEND(sockfd) //
 
 #define BUFFER_SIZE 8096
 char recv_buffer[BUFFER_SIZE];
@@ -101,6 +102,8 @@ server_process *  process_global;
 
 static zend_class_entry * php_server_class_entry;
 
+static HashTable callback_ht;
+
 /*
 	argsinfo
 */
@@ -114,7 +117,8 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_bind, 0, 0, 2)
 	ZEND_ARG_INFO(0,callback)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_send, 0, 0, 1)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_send, 0, 0, 2)
+	ZEND_ARG_INFO(0,sockfd)
 	ZEND_ARG_INFO(0,message)
 ZEND_END_ARG_INFO()
 
@@ -139,7 +143,7 @@ const zend_function_entry php_server_class_functions[] = {
 
 /* {{{ 测试模块是否正常加载
  */
-PHP_FUNCTION(test_php_server){
+/*PHP_FUNCTION(test_php_server){
 	int ret,process_number=PHP_SERVER_G(process_number);
 
 	PHP_SERVER_DEBUG("function is ok !\n");
@@ -161,45 +165,58 @@ PHP_FUNCTION(test_php_server){
 	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
 
 	RETURN_STRING("php-server");
-}
+}*/
 /* }}} */
 PHP_FUNCTION(php_server_create)
 {
 	char * ip;
-	long ip_len,port;
+	size_t ip_len,port;
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"sl",&ip,&ip_len,&port) == FAILURE){
 		return;
 	}
 	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
 	array_init(this_settings);
 	add_assoc_stringl_ex(this_settings,"ip",sizeof("ip")-1,ip,ip_len);
-	add_assoc_long_ex(this_settings,"port",sizeof("port")-1,port);
+	add_assoc_long_ex(this_settings,"port",sizeof("port")-1,(zend_long)port);
 	zend_update_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,this_settings);
 }
 PHP_FUNCTION(php_server_bind)
 {
-
+	zval * event , *callback;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"zz",&event,&callback) == FAILURE || Z_TYPE_P(event) != IS_STRING){
+		return;
+	}
+	zend_hash_add(&callback_ht,Z_STR_P(event),callback);
 }
 PHP_FUNCTION(php_server_send)
 {
-
+	char * message;
+	size_t sockfd,message_len;
+	if(zend_parse_paramesters(ZEND_NUM_ARGS(),"ls",&sockfd,&message,&message_len) == FAILURE){
+		RETURN_LONG(-1);
+	}else{
+		RETURN_LONG(send(sockfd,message,message_len,0));
+	}
 }
+
+
+
 PHP_FUNCTION(php_server_set)
 {
-	char * key_str = NULL;
-	int key_len;
+	char * key_str, * tmp_str;
+	size_t key_len,tmp_len;
 	zval *value;
-	if(zend_parse_parameters(ZEND_NUM_ARGS(),"s",&key_str,&key_len) == FAILURE){
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"sz",&key_str,&key_len,&value) == FAILURE){
 		return;
 	}else{
 		zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
-		//zend_hash_str_update(Z_ARRVAL_P(this_settings),key_str,key_len,value);
+		zend_hash_str_update(Z_ARRVAL_P(this_settings),key_str,key_len,value);
 	}
 }
 PHP_FUNCTION(php_server_get)
 {
 	char * key = NULL;
-	int key_len;
+	size_t key_len;
 	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
 	if(1!= ZEND_NUM_ARGS() || zend_parse_parameters(ZEND_NUM_ARGS(),"s",&key,&key_len) == FAILURE){
 		RETURN_ZVAL(this_settings,1,NULL);
@@ -211,6 +228,33 @@ PHP_FUNCTION(php_server_get)
 	}
 }
 PHP_FUNCTION(php_server_run){
+	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
+	zval * ip = zend_hash_str_find(Z_ARRVAL_P(this_settings),"ip",sizeof("ip")-1);
+	zval * port = zend_hash_str_find(Z_ARRVAL_P(this_settings),"port",sizeof("port")-1);
+	if(Z_TYPE_P(ip)!= IS_STRING  || Z_TYPE_P(port)!=IS_LONG){
+		php_error_docref(NULL,E_ERROR,"ip must be string and port must be int");
+		return;
+	}
+
+	int ret,process_number=PHP_SERVER_G(process_number);
+
+	//PHP_SERVER_DEBUG("function is ok !\n");
+	PHP_SERVER_DEBUG("%s %d\n",Z_STRVAL_P(ip),(int)Z_LVAL_P(port));
+	ret = php_server_setup_socket("127.0.0.1",9000);
+	//PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
+
+	ret = php_server_setup_process_pool(socket_fd_global,process_number);
+	//PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
+
+	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
+	php_server_run();
+	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
+
+	ret = php_server_shutdown_process_pool(process_number);
+	//PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
+
+	ret = php_server_shutdown_socket();
+	//PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());
 
 }
 
@@ -235,6 +279,9 @@ PHP_MINIT_FUNCTION(php_server)
 	php_server_class_entry = zend_register_internal_class(&ce);
 	/* MUST CHANGE TO ZEND_ACC_PRIVATE */
 	zend_declare_property_null(php_server_class_entry,"_settings",sizeof("_settings")-1,ZEND_ACC_PUBLIC);
+
+	/* CALLBACK HASHTABLE INIT */
+	zend_hash_init(&callback_ht, 0, NULL, NULL, 1);
 	return SUCCESS;
 }
 /* }}} */
@@ -244,7 +291,8 @@ PHP_MINIT_FUNCTION(php_server)
 PHP_MSHUTDOWN_FUNCTION(php_server)
 {
 	UNREGISTER_INI_ENTRIES();
-
+	/* CALLBACK HASHTABLE CLEAN */
+	zend_hash_destroy(&callback_ht);
 	return SUCCESS;
 }
 /* }}} */
@@ -664,12 +712,32 @@ int php_server_run_worker_process(){
 						bzero(&client,client_len);
 						conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
 					
-						PHP_SERVER_DEBUG("worker %d accepted\n",process_global->process_index);
-						PHP_SERVER_DEBUG("accept sockfd in worker:%d\n",conn_fd);			
+						PHP_SERVER_DEBUG("worker %d accepted %d\n",process_global->process_index,conn_fd);
 						if(conn_fd < 0){
 							continue;
 						}
 						php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd);
+						/* call accept*/
+						zval * accept_cb = add_hash_str_find(&callback_ht,"accept",sizeof("accept")-1);
+						char client_ip_str[INET_ADDRSTRLEN];
+						long port = (long)ntohs(client.sin_port);
+						if(port > 0 && NULL != inet_ntop(AF_INET,(void *)&client,client_ip_str,INET_ADDRSTRLEN)){
+							zval args[3], * retval;
+							ZVAL_LONG(&args[0],conn_fd);
+							ZVAL_STRING(&args[1],client_ip_str);
+							ZVAL_LONG(&args[2],port);
+							if(accept_cb == NULL || call_user_function(EG(function_table),NULL,accept_cb,&retval,3,args)){
+								php_error_docref(NULL,E_WARNING,"accept error.\n");
+							}
+							PHP_SERVER_DEBUG("worker %d accepted %d after call\n",process_global->process_index,conn_fd);
+							zval_dtor(&args[0]);
+							zval_dtor(&args[1]);
+							zval_dtor(&args[2]);
+							if(retval){
+								zval_ptr_dtor(retval);
+							}
+						}
+						/*call accept end*/
 					}else if(data==PHP_SERVER_DATA_KILL){
 						process_global->is_stop = 1;
 						break;
@@ -716,7 +784,7 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
  * Every user visible function must have an entry in php_server_functions[].
  */
 const zend_function_entry php_server_functions[] = {
-	PHP_FE(test_php_server , NULL)
+//	PHP_FE(test_php_server , NULL)
 	PHP_FE_END	/* Must be the last line in php_server_functions[] */
 };
 /* }}} */
