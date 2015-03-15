@@ -53,10 +53,11 @@
 	     * @return bool
 	     * function php_server_send
 	     */
+	    /* 使用全局函数php_server_send($fd,$message)代替
 	    public function send($message){
 	
 	        return true;
-	    }
+	    }*/
 	
 	    /**
 	     * 设置当前的配置
@@ -97,28 +98,34 @@
 
 	/**
 	 * 接受连接时的回调
-	 * @param array $remote = array( 'ip' => '' , port => 0 )
+	 * @param int $fd
+	 * @param string $ip
+	 * @param int $port
 	 * @return void
 	 */
-	function bind_accept($remote){
+	function bind_accept($fd,$ip,$port){
 	
 	}
 	
 	
 	/**
 	 * 接受消息时的回调
+	 * @param int $fd
 	 * @param string $message
-	 * @param array $remote
+	 * @param string $ip
+	 * @param int $port
 	 */
-	function bind_receive($message,$remote){
+	function bind_receive($fd,$message,$ip,$port){
 	
 	}
 	
 	/**
 	 * 当连接关闭时的回调
-	 * @param array $remote
+	 * @param int $fd
+	 * @param string $ip
+	 * @param int $port
 	 */
-	function bind_close($remote){
+	function bind_close($fd,$ip,$port){
 	
 	}
 
