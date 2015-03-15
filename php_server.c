@@ -81,7 +81,7 @@ PHP_INI_END()
 #define PHP_SERVER_DATA_KILL '9'
 
 //调试的宏
-#define PHP_SERVER_DEBUG //
+#define PHP_SERVER_DEBUG printf
 //长度要加上最后的\0结束符
 //#define PHP_SERVER_RESPONSE "HTTP1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
 //#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
@@ -134,7 +134,7 @@ ZEND_END_ARG_INFO()
 const zend_function_entry php_server_class_functions[] = {
 		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
 		ZEND_FENTRY(bind,PHP_FN(php_server_bind),arginfo_php_server_bind,ZEND_ACC_PUBLIC)
-		ZEND_FENTRY(send,PHP_FN(php_server_send),arginfo_php_server_send,ZEND_ACC_PUBLIC)
+		//ZEND_FENTRY(send,PHP_FN(php_server_send),arginfo_php_server_send,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(set,PHP_FN(php_server_set),arginfo_php_server_set,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(get,PHP_FN(php_server_get),arginfo_php_server_get,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(run,PHP_FN(php_server_run),NULL,ZEND_ACC_PUBLIC)
@@ -187,9 +187,10 @@ PHP_FUNCTION(php_server_bind)
 		return;
 	}
 	zend_hash_add(&callback_ht,Z_STR_P(event),callback);
-	zval_ptr_dtor(&event);
-	zval_ptr_dtor(&callback);
+	zval_ptr_dtor(event);
+	zval_ptr_dtor(callback);
 }
+
 PHP_FUNCTION(php_server_send)
 {
 	char * message;
@@ -373,7 +374,7 @@ void php_set_proc_name(char * name){
 	zval function_name;
 	ZVAL_STRING(&function_name,"cli_set_process_title");
 	ZVAL_STRING(&argv[0],name);
-	if(call_user_function(EG(function_table),NULL,&function_name,&retval,1,argv) == FAILURE){
+	if(call_user_function_ex(EG(function_table),NULL,&function_name,&retval,1,argv,1,NULL) == FAILURE){
 		php_error_docref(NULL, E_WARNING, "Could not call the cli_set_process_name");
 	}
 	zval_ptr_dtor(&argv[0]);
@@ -671,7 +672,7 @@ char * php_server_recv_from_client(int sock_fd){
 			php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);	
 		}
 		PHP_SERVER_DEBUG("worker recv error\n");
-		
+
 		return NULL;
 	}else if(ret == 0){
 		/* 说明客户端关闭了连接 */
@@ -679,16 +680,16 @@ char * php_server_recv_from_client(int sock_fd){
 		/*callback close*/
 		struct sockaddr_in client;
 		size_t client_len = sizeof(client);
-		getsockname(sock_fd,(struct sockaddr *)&client,&client_len);
+		getsockname(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
 		zval * close_cb = zend_hash_str_find(&callback_ht,"close",sizeof("close")-1);
 		char client_ip_str[INET_ADDRSTRLEN];
 		long port = (long)ntohs(client.sin_port);
 		if(NULL!=close_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-			zval args[3], * retval;
+			zval args[3], * retval = NULL;
 			ZVAL_LONG(&args[0],sock_fd);
 			ZVAL_STRING(&args[1],client_ip_str);
 			ZVAL_LONG(&args[2],port);
-			if(call_user_function(EG(function_table),NULL,close_cb,&retval,3,args)){
+			if(call_user_function(EG(function_table),NULL,close_cb,retval,3,args)){
 				php_error_docref(NULL,E_WARNING,"close error.\n");
 			}
 			PHP_SERVER_DEBUG("worker %d close %d after call\n",process_global->process_index,sock_fd);
@@ -696,7 +697,7 @@ char * php_server_recv_from_client(int sock_fd){
 			zval_dtor(&args[1]);
 			zval_dtor(&args[2]);
 			if(retval){
-				zval_ptr_dtor(&retval);
+				zval_dtor(retval);
 			}
 		}
 		/*callback close end*/
@@ -709,17 +710,17 @@ char * php_server_recv_from_client(int sock_fd){
 		/* callback receive */
 		struct sockaddr_in client;
 		size_t client_len = sizeof(client);
-		getsockname(sock_fd,(struct sockaddr *)&client,&client_len);
+		getsockname(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
 		zval * receive_cb = zend_hash_str_find(&callback_ht,"receive",sizeof("receive")-1);
 		char client_ip_str[INET_ADDRSTRLEN];
 		long port = (long)ntohs(client.sin_port);
 		if(NULL!=receive_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-			zval args[4], * retval;
+			zval args[4], * retval = NULL;
 			ZVAL_LONG(&args[0],sock_fd);
 			ZVAL_STRINGL(&args[1],recv_buffer,ret);
 			ZVAL_STRING(&args[2],client_ip_str);
 			ZVAL_LONG(&args[3],port);
-			if(call_user_function(EG(function_table),NULL,receive_cb,&retval,4,args)){
+			if(call_user_function(EG(function_table),NULL,receive_cb,retval,4,args)){
 				php_error_docref(NULL,E_WARNING,"receive error.\n");
 			}
 			PHP_SERVER_DEBUG("worker %d receive %d after call\n",process_global->process_index,sock_fd);
@@ -728,7 +729,7 @@ char * php_server_recv_from_client(int sock_fd){
 			zval_dtor(&args[2]);
 			zval_dtor(&args[3]);
 			if(retval){
-				zval_ptr_dtor(&retval);
+				zval_dtor(retval);
 			}
 		}
 		/* callback receive end */
@@ -779,11 +780,11 @@ int php_server_run_worker_process(){
 						char client_ip_str[INET_ADDRSTRLEN];
 						long port = (long)ntohs(client.sin_port);
 						if(NULL!=accept_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-							zval args[3], * retval;
+							zval args[3], * retval = NULL;
 							ZVAL_LONG(&args[0],conn_fd);
 							ZVAL_STRING(&args[1],client_ip_str);
 							ZVAL_LONG(&args[2],port);
-							if(call_user_function(EG(function_table),NULL,accept_cb,&retval,3,args)){
+							if(call_user_function(EG(function_table),NULL,accept_cb,retval,3,args)){
 								php_error_docref(NULL,E_WARNING,"accept error.\n");
 							}
 							PHP_SERVER_DEBUG("worker %d accept %d after call\n",process_global->process_index,conn_fd);
@@ -791,7 +792,7 @@ int php_server_run_worker_process(){
 							zval_dtor(&args[1]);
 							zval_dtor(&args[2]);
 							if(retval){
-								zval_ptr_dtor(&retval);
+								zval_dtor(retval);
 							}
 						}
 						/*call accept end*/
@@ -842,6 +843,7 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
  */
 const zend_function_entry php_server_functions[] = {
 //	PHP_FE(test_php_server , NULL)
+	PHP_FE(php_server_send,arginfo_php_server_send)
 	PHP_FE_END	/* Must be the last line in php_server_functions[] */
 };
 /* }}} */
