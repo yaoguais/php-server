@@ -120,6 +120,7 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_send, 0, 0, 2)
 	ZEND_ARG_INFO(0,sockfd)
 	ZEND_ARG_INFO(0,message)
+	ZEND_ARG_INFO(0,flush)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_set, 0, 0, 2)
@@ -195,11 +196,20 @@ PHP_FUNCTION(php_server_send)
 {
 	char * message;
 	size_t sockfd,message_len;
-	if(zend_parse_parameters(ZEND_NUM_ARGS(),"ls",&sockfd,&message,&message_len) == FAILURE){
-		RETURN_LONG(-1);
-	}else{
-		RETURN_LONG(send((int)sockfd,message,message_len,0));
+	zend_bool is_flush = SUCCESS;
+	int ret = -1;
+	FILE * fp;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"ls|b",&sockfd,&message,&message_len,&is_flush) != FAILURE){
+		ret = send((int)sockfd,message,message_len,0);
+		if(is_flush == SUCCESS){
+			if(NULL != (fp = fdopen(sockfd,"rw"))){
+				fflush(fp);
+				fclose(fp);
+				PHP_SERVER_DEBUG("flush %d size\n",ret);
+			}
+		}
 	}
+	RETURN_LONG(ret);
 }
 
 
