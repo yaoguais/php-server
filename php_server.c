@@ -204,7 +204,8 @@ PHP_FUNCTION(php_server_send)
 		if(is_flush == SUCCESS){
 			if(NULL != (fp = fdopen(sockfd,"rw"))){
 				fflush(fp);
-				fclose(fp);
+				//fclose(fp);
+				fp = NULL;
 				PHP_SERVER_DEBUG("flush %d size\n",ret);
 			}
 		}

@@ -1,28 +1,39 @@
 <?php
 
-$server = new php_server('192.168.1.113',9009);
+$server = new php_server('192.168.37.134',9009);
 
 print_r($server->get());
 
 function bind_accept($fd,$ip,$port){
-	echo "accept $fd $ip $port ]\n";
+	echo "accept $fd $ip $port aaaaaaaaaaaaaaaaaaaaaaa]\n";
 }
 
 $server->bind('accept','bind_accept');
 
 function bind_receive($fd,$message,$ip,$port){
 	//$message = rtrim($message,"\r\n");
-	echo "receive $fd $message $ip $port ]\n";
-	echo $message;
+	//echo "receive $fd $message $ip $port ]\n";
+	$messageLen = strlen($message);
+	echo "receive $fd $messageLen $ip $port rrrrrrrrrrrrrrrrrrrr]\n";
+	//echo $message;
+	$content = <<<EOF
+<html>
+		<body>
+			<h2>PHP SERVER 1.0</h2>
+		</body>
+	</html>
+EOF;
+	$contentLen = strlen($content);
 	$response = <<<EOF
 HTTP/1.1 200 OK
-Server: bfe/1.0.5.38
-Content-Type: text/html; charset=utf-8
-Transfer-Encoding: chunked
+Date: Tue, 17 Mar 2015 04:43:41 GMT
+Server: Apache/2.2.15 (CentOS)
+X-Powered-By: PHP/5.4.34
+Content-Length: $contentLen
 Connection: close
-Content-Length: 11
+Content-Type: text/html; charset=UTF-8
 
-0123456789
+$content
 EOF;
 	php_server_send($fd,$response);
 }
@@ -30,7 +41,7 @@ EOF;
 $server->bind('receive','bind_receive');
 
 function bind_close($fd,$ip,$port){
-	echo "close $fd $ip $port ]\n";
+	echo "close $fd $ip $port ccccccccccccccccccc]\n";
 }
 
 $server->bind('close','bind_close');
