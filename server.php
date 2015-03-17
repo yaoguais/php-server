@@ -25,7 +25,7 @@ function bind_receive($fd,$message,$ip,$port){
 EOF;
 	$contentLen = strlen($content);
 	$response = <<<EOF
-HTTP/1.1 200 OK
+HTTP/1.0 200 OK
 Date: Tue, 17 Mar 2015 04:43:41 GMT
 Server: Apache/2.2.15 (CentOS)
 X-Powered-By: PHP/5.4.34
