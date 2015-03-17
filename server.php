@@ -35,7 +35,7 @@ Content-Type: text/html; charset=UTF-8
 
 $content
 EOF;
-	php_server_send($fd,$response);
+	php_server_send($fd,$response,true);
 }
 
 $server->bind('receive','bind_receive');
