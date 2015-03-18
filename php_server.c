@@ -132,6 +132,11 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 0)
 	ZEND_ARG_INFO(0,key)
 ZEND_END_ARG_INFO()
 
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_close, 0, 0, 0)
+	ZEND_ARG_INFO(0,sockfd)
+ZEND_END_ARG_INFO()
+
 const zend_function_entry php_server_class_functions[] = {
 		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
 		ZEND_FENTRY(bind,PHP_FN(php_server_bind),arginfo_php_server_bind,ZEND_ACC_PUBLIC)
@@ -196,12 +201,12 @@ PHP_FUNCTION(php_server_send)
 {
 	char * message;
 	size_t sockfd,message_len;
-	zend_bool is_flush = SUCCESS;
+	zend_bool is_flush = 0;
 	int ret = -1;
 	FILE * fp;
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"ls|b",&sockfd,&message,&message_len,&is_flush) != FAILURE){
 		ret = send((int)sockfd,message,message_len,0);
-		if(is_flush == SUCCESS){
+		if(is_flush){
 			if(NULL != (fp = fdopen(sockfd,"rw"))){
 				fflush(fp);
 				//fclose(fp);
@@ -257,6 +262,10 @@ PHP_FUNCTION(php_server_run){
 	ret = php_server_setup_socket(Z_STRVAL_P(ip),(int)Z_LVAL_P(port));
 	//ret = php_server_setup_socket("127.0.0.1",9009);
 	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
+	if(ret){
+		php_error_docref(NULL,E_ERROR,"create socket error\n");
+		return;
+	}
 
 	ret = php_server_setup_process_pool(socket_fd_global,process_number);
 	//PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
@@ -273,6 +282,17 @@ PHP_FUNCTION(php_server_run){
 
 }
 
+
+PHP_FUNCTION(php_server_close)
+{
+	int sockfd;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) == FAILURE){
+		RETURN_FALSE;
+	}
+	
+	php_server_epoll_del_fd(process_global->epoll_fd,sockfd);
+	RETURN_TRUE;
+}
 /* {{{ php_php_server_init_globals
  */
 static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
@@ -416,12 +436,6 @@ void php_server_epoll_del_fd(int epoll_fd,int fd){
 	close(fd);
 }
 
-
-/* 把fd从epool事件表中移除 */
-void php_server_epoll_remove_fd(int epoll_fd,int fd){
-	epoll_ctl(epoll_fd,EPOLL_CTL_DEL,fd,0);
-	close(fd);
-}
 
 zend_bool php_server_setup_socket(char * ip,int port){
 	
@@ -690,7 +704,7 @@ int php_server_recv_from_client(int sock_fd){
 		/*callback close*/
 		struct sockaddr_in client;
 		size_t client_len = sizeof(client);
-		getsockname(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
+		getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
 		zval * close_cb = zend_hash_str_find(&callback_ht,"close",sizeof("close")-1);
 		char client_ip_str[INET_ADDRSTRLEN];
 		long port = (long)ntohs(client.sin_port);
@@ -716,7 +730,7 @@ int php_server_recv_from_client(int sock_fd){
 		/* callback receive */
 		struct sockaddr_in client;
 		size_t client_len = sizeof(client);
-		getsockname(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
+		getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
 		zval * receive_cb = zend_hash_str_find(&callback_ht,"receive",sizeof("receive")-1);
 		char client_ip_str[INET_ADDRSTRLEN];
 		long port = (long)ntohs(client.sin_port);
@@ -843,6 +857,7 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
 const zend_function_entry php_server_functions[] = {
 //	PHP_FE(test_php_server , NULL)
 	PHP_FE(php_server_send,arginfo_php_server_send)
+	PHP_FE(php_server_close,arginfo_php_server_close)
 	PHP_FE_END	/* Must be the last line in php_server_functions[] */
 };
 /* }}} */

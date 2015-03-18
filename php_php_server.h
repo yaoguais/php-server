@@ -71,6 +71,7 @@ PHP_FUNCTION(php_server_send);
 PHP_FUNCTION(php_server_set);
 PHP_FUNCTION(php_server_get);
 PHP_FUNCTION(php_server_run);
+PHP_FUNCTION(php_server_close);
 void php_server_set_proc_name(int argc,char ** argv,char * name);
 void php_set_proc_name(char * name);
 int php_server_set_nonblock(int fd);

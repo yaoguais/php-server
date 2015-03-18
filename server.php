@@ -15,20 +15,14 @@ function bind_receive($fd,$message,$ip,$port){
 	//echo "receive $fd $message $ip $port ]\n";
 	$messageLen = strlen($message);
 	echo "receive $fd $messageLen $ip $port rrrrrrrrrrrrrrrrrrrr]\n";
-	//echo $message;
-	$content = <<<EOF
-<html>
-		<body>
-			<h2>PHP SERVER 1.0</h2>
-		</body>
-	</html>
-EOF;
+	echo $message;
+	$content = "<html><body><h2>PHP SERVER 1.0</h2></body></html>";
 	$contentLen = strlen($content);
 	$response = <<<EOF
-HTTP/1.0 200 OK
+HTTP/1.1 200 OK
 Date: Tue, 17 Mar 2015 04:43:41 GMT
-Server: Apache/2.2.15 (CentOS)
-X-Powered-By: PHP/5.4.34
+Server: PHP SERVER 1.0
+X-Powered-By: PHP/7.0.0-dev
 Content-Length: $contentLen
 Connection: close
 Content-Type: text/html; charset=UTF-8
@@ -36,6 +30,7 @@ Content-Type: text/html; charset=UTF-8
 $content
 EOF;
 	php_server_send($fd,$response,true);
+	//php_server_close($fd);
 }
 
 $server->bind('receive','bind_receive');
