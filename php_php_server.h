@@ -43,6 +43,7 @@ ZEND_BEGIN_MODULE_GLOBALS(php_server)
 	int process_number;
 	char * master_name;
 	char * worker_name;
+	int debug;
 ZEND_END_MODULE_GLOBALS(php_server)
 
 
@@ -68,10 +69,10 @@ typedef struct php_server_process{
 PHP_FUNCTION(php_server_create);
 PHP_FUNCTION(php_server_bind);
 PHP_FUNCTION(php_server_send);
+PHP_FUNCTION(php_server_close);
 PHP_FUNCTION(php_server_set);
 PHP_FUNCTION(php_server_get);
 PHP_FUNCTION(php_server_run);
-PHP_FUNCTION(php_server_close);
 void php_server_set_proc_name(int argc,char ** argv,char * name);
 void php_set_proc_name(char * name);
 int php_server_set_nonblock(int fd);

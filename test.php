@@ -1,11 +1,3 @@
 <?php
 
-$obj = new php_server('0.0.0.0',9000);
-
-var_dump($obj->get());
-
-var_dump($obj->get('port'));
-
-$obj->set('ip','127.0.0.1');
-
-var_dump($obj->get('ip'));
+var_dump(function_exists('php_server_close'));

@@ -1,6 +1,6 @@
 <?php
 
-$server = new php_server('192.168.37.134',9009);
+$server = new php_server('192.168.1.104',9009);
 
 print_r($server->get());
 
@@ -30,7 +30,7 @@ Content-Type: text/html; charset=UTF-8
 $content
 EOF;
 	php_server_send($fd,$response,true);
-	//php_server_close($fd);
+	php_server_close($fd);
 }
 
 $server->bind('receive','bind_receive');

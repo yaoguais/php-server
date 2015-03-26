@@ -47,8 +47,8 @@
 #include <sys/stat.h>
 #include <malloc.h>
 
-ZEND_DECLARE_MODULE_GLOBALS(php_server)
-//struct zend_php_server_globals php_server_globals;
+//ZEND_DECLARE_MODULE_GLOBALS(php_server)
+static zend_php_server_globals php_server_globals;
 
 /* True global resources - no need for thread safety here */
 static int le_php_server;
@@ -59,6 +59,7 @@ PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("php_server.process_number", "7", PHP_INI_ALL, OnUpdateLong, process_number, zend_php_server_globals, php_server_globals)
 	STD_PHP_INI_ENTRY("php_server.master_name", "php server master", PHP_INI_ALL, OnUpdateString, master_name, zend_php_server_globals, php_server_globals)
 	STD_PHP_INI_ENTRY("php_server.worker_name", "php server worker", PHP_INI_ALL, OnUpdateString, worker_name, zend_php_server_globals, php_server_globals)
+	STD_PHP_INI_ENTRY("php_server.debug", "0", PHP_INI_ALL, OnUpdateBool, debug, zend_php_server_globals, php_server_globals)
 PHP_INI_END()
 /* }}} */
 
@@ -81,7 +82,13 @@ PHP_INI_END()
 #define PHP_SERVER_DATA_KILL '9'
 
 //调试的宏
-#define PHP_SERVER_DEBUG printf
+//#define PHP_SERVER_DEBUG(format,...) do{ \
+											if(php_server_globals && php_server_globals.debug)	\
+												printf(format, ##__VA_ARGS__);	\
+									   }while(0);
+
+#define PHP_SERVER_DEBUG(format,...) if(php_server_globals.debug)printf(format, ##__VA_ARGS__);
+
 //长度要加上最后的\0结束符
 //#define PHP_SERVER_RESPONSE "HTTP/1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
 //#define PHP_SERVER_HTTP_SEND(sockfd) send(sockfd,PHP_SERVER_RESPONSE,sizeof(PHP_SERVER_RESPONSE),0); \
@@ -133,46 +140,19 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 0)
 ZEND_END_ARG_INFO()
 
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_close, 0, 0, 0)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_close, 0, 0, 1)
 	ZEND_ARG_INFO(0,sockfd)
 ZEND_END_ARG_INFO()
 
 const zend_function_entry php_server_class_functions[] = {
 		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
 		ZEND_FENTRY(bind,PHP_FN(php_server_bind),arginfo_php_server_bind,ZEND_ACC_PUBLIC)
-		//ZEND_FENTRY(send,PHP_FN(php_server_send),arginfo_php_server_send,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(set,PHP_FN(php_server_set),arginfo_php_server_set,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(get,PHP_FN(php_server_get),arginfo_php_server_get,ZEND_ACC_PUBLIC)
 		ZEND_FENTRY(run,PHP_FN(php_server_run),NULL,ZEND_ACC_PUBLIC)
 		PHP_FE_END
 };
 
-/* {{{ 测试模块是否正常加载
- */
-/*PHP_FUNCTION(test_php_server){
-	int ret,process_number=PHP_SERVER_G(process_number);
-
-	PHP_SERVER_DEBUG("function is ok !\n");
-
-	ret = php_server_setup_socket("127.0.0.1",9000);
-	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
-
-	ret = php_server_setup_process_pool(socket_fd_global,process_number);
-	PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
-
-	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
-	php_server_run();
-	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
-
-	ret = php_server_shutdown_process_pool(process_number);
-	PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
-
-	ret = php_server_shutdown_socket();
-	PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());		
-
-	RETURN_STRING("php-server");
-}*/
-/* }}} */
 PHP_FUNCTION(php_server_create)
 {
 	char * ip;
@@ -218,6 +198,15 @@ PHP_FUNCTION(php_server_send)
 	RETURN_LONG(ret);
 }
 
+PHP_FUNCTION(php_server_close)
+{
+	size_t sockfd;
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) != FAILURE){
+		php_server_epoll_del_fd(process_global->epoll_fd,(int)sockfd);
+		//PHP_SERVER_DEBUG("close sockfd %d\n",(int)sockfd);
+	}
+}
+
 
 
 PHP_FUNCTION(php_server_set)
@@ -255,20 +244,25 @@ PHP_FUNCTION(php_server_run){
 		return;
 	}
 
-	int ret,process_number=PHP_SERVER_G(process_number);
+	zend_bool ret;
+	int process_number=PHP_SERVER_G(process_number);
 
 	//PHP_SERVER_DEBUG("function is ok !\n");
 
 	ret = php_server_setup_socket(Z_STRVAL_P(ip),(int)Z_LVAL_P(port));
 	//ret = php_server_setup_socket("127.0.0.1",9009);
 	PHP_SERVER_DEBUG("setup_socket:%d\n",ret);
-	if(ret){
+	if(ret!=SUCCESS){
 		php_error_docref(NULL,E_ERROR,"create socket error\n");
 		return;
 	}
 
 	ret = php_server_setup_process_pool(socket_fd_global,process_number);
 	//PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
+	if(ret!=SUCCESS){
+		php_error_docref(NULL,E_ERROR,"create process poll error\n");
+		return;
+	}
 
 	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
 	php_server_run();
@@ -282,17 +276,6 @@ PHP_FUNCTION(php_server_run){
 
 }
 
-
-PHP_FUNCTION(php_server_close)
-{
-	int sockfd;
-	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) == FAILURE){
-		RETURN_FALSE;
-	}
-	
-	php_server_epoll_del_fd(process_global->epoll_fd,sockfd);
-	RETURN_TRUE;
-}
 /* {{{ php_php_server_init_globals
  */
 static void php_php_server_init_globals(zend_php_server_globals *php_server_globals)
@@ -300,6 +283,7 @@ static void php_php_server_init_globals(zend_php_server_globals *php_server_glob
     php_server_globals->process_number = 0;
 	php_server_globals->master_name = NULL;
 	php_server_globals->worker_name = NULL;
+	php_server_globals->debug = 0;
 }
 /* }}} */
 
@@ -405,7 +389,7 @@ void php_set_proc_name(char * name){
 	zval function_name;
 	ZVAL_STRING(&function_name,"cli_set_process_title");
 	ZVAL_STRING(&argv[0],name);
-	if(call_user_function_ex(EG(function_table),NULL,&function_name,&retval,1,argv,1,NULL) == FAILURE){
+	if(call_user_function_ex(EG(function_table),NULL,&function_name,&retval,1,argv,0,NULL) == FAILURE){
 		php_error_docref(NULL, E_WARNING, "Could not call the cli_set_process_name");
 	}
 	zval_ptr_dtor(&argv[0]);
@@ -713,7 +697,7 @@ int php_server_recv_from_client(int sock_fd){
 			ZVAL_LONG(&args[0],sock_fd);
 			ZVAL_STRING(&args[1],client_ip_str);
 			ZVAL_LONG(&args[2],port);
-			if(call_user_function(EG(function_table),NULL,close_cb,&retval,3,args)){
+			if(call_user_function_ex(EG(function_table),NULL,close_cb,&retval,3,args,0,NULL)){
 				php_error_docref(NULL,E_WARNING,"close error.\n");
 			}
 			PHP_SERVER_DEBUG("worker %d close %d after call\n",process_global->process_index,sock_fd);
@@ -740,7 +724,7 @@ int php_server_recv_from_client(int sock_fd){
 			ZVAL_STRINGL(&args[1],recv_buffer,ret);
 			ZVAL_STRING(&args[2],client_ip_str);
 			ZVAL_LONG(&args[3],port);
-			if(call_user_function(EG(function_table),NULL,receive_cb,&retval,4,args)){
+			if(call_user_function_ex(EG(function_table),NULL,receive_cb,&retval,4,args,0,NULL)){
 				php_error_docref(NULL,E_WARNING,"receive error.\n");
 			}
 			PHP_SERVER_DEBUG("worker %d receive %d after call\n",process_global->process_index,sock_fd);
@@ -801,7 +785,7 @@ int php_server_run_worker_process(){
 							ZVAL_LONG(&args[0],conn_fd);
 							ZVAL_STRING(&args[1],client_ip_str);
 							ZVAL_LONG(&args[2],port);
-							if(call_user_function(EG(function_table),NULL,accept_cb,&retval,3,args)){
+							if(call_user_function_ex(EG(function_table),NULL,accept_cb,&retval,3,args,0,NULL)){
 								php_error_docref(NULL,E_WARNING,"accept error.\n");
 							}
 							PHP_SERVER_DEBUG("worker %d accept %d after call\n",process_global->process_index,conn_fd);
@@ -855,7 +839,6 @@ zend_bool php_server_shutdown_process_pool(unsigned int process_number){
  * Every user visible function must have an entry in php_server_functions[].
  */
 const zend_function_entry php_server_functions[] = {
-//	PHP_FE(test_php_server , NULL)
 	PHP_FE(php_server_send,arginfo_php_server_send)
 	PHP_FE(php_server_close,arginfo_php_server_close)
 	PHP_FE_END	/* Must be the last line in php_server_functions[] */
