@@ -169,15 +169,17 @@
 
 ApacheBench：
 
-	PHP Version			: 7.0.0-dev
+	PHP Version		: 7.0.0-dev
 	Linux version		: Linux version 3.13.0-34-generic 
-						  (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
-	内存					: 1GB
-	处理器				: 1
+				  (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
+	内存			: 3.8 GiB
+	处理器			: Intel® Core™ i5-4430 CPU @ 3.00GHz × 4
 	http content		: <h2>PHP SERVER 1.0</h2>
 	content length		: 24 bytes
 	php server version	: 1.0
 	Apache2 version		: Apache/2.4.7 (Ubuntu)
+	php server 测试run.php
+	apache     测试index.html
 
 经测试，PHP-SERVER rps一直在30,000以上,apache2-server rps也在30,000以上。
 
