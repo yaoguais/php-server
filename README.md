@@ -170,8 +170,8 @@
 ApacheBench：
 
 	PHP Version		: 7.0.0-dev
-	Linux version		: Linux version 3.13.0-34-generic 
-				  (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
+	Linux versio		: Linux version 3.13.0-34-generic 
+				(buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
 	内存			: 3.8 GiB
 	处理器			: Intel® Core™ i5-4430 CPU @ 3.00GHz × 4
 	http content		: <h2>PHP SERVER 1.0</h2>
