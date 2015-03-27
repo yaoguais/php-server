@@ -8,6 +8,9 @@
 3. 信号处理
 4. 压力测试
 
+Server version: Apache/2.4.7 (Ubuntu)
+Linux version 3.13.0-34-generic (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
+
 配置项有：
 
 1. 进程池的大小process\_number
