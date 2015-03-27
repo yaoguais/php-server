@@ -50,18 +50,6 @@
 	    }
 	
 	    /**
-	     * 向客户端发送数据
-	     * @param $message
-	     * @return bool
-	     * function php_server_send
-	     */
-	    /* 使用全局函数php_server_send($fd,$message)代替
-	    public function send($message){
-	
-	        return true;
-	    }*/
-	
-	    /**
 	     * 设置当前的配置
 	     * @param string $key
 	     * @param mixed $value
@@ -129,6 +117,27 @@
 	 */
 	function bind_close($fd,$ip,$port){
 	
+	}
+
+全局函数：
+
+	/**
+	 * 主动向客户端发送消息
+	 * @param int $fd
+	 * @param string $message
+	 * @param bool $flush
+	 * @return int (成功发送的字节数)
+	 */
+	function php_server_send($fd,$message,$flush=true){
+
+	}
+
+	/**
+	 * 主动关闭客户端连接
+	 * @param int $fd
+	 */
+	function php_server_close($fd){
+
 	}
 
 
