@@ -46,6 +46,7 @@
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <malloc.h>
+#include <time.h>
 
 //ZEND_DECLARE_MODULE_GLOBALS(php_server)
 static zend_php_server_globals php_server_globals;
@@ -82,12 +83,31 @@ PHP_INI_END()
 #define PHP_SERVER_DATA_KILL '9'
 
 //调试的宏
-//#define PHP_SERVER_DEBUG(format,...) do{ \
-											if(php_server_globals && php_server_globals.debug)	\
+#define PHP_SERVER_DEBUG(format,...) do{ \
+											if(php_server_globals.debug)		\
 												printf(format, ##__VA_ARGS__);	\
 									   }while(0);
 
-#define PHP_SERVER_DEBUG(format,...) if(php_server_globals.debug)printf(format, ##__VA_ARGS__);
+//#define PHP_SERVER_DEBUG(format,...) if(php_server_globals.debug)printf(format, ##__VA_ARGS__);
+
+//clock_t php_server_global_clock;
+
+//#define PHP_SERVER_CLOCK_START()  do{	\
+									if(php_server_globals.debug)			\
+										php_server_global_clock = clock();	\
+								  }while(0);
+
+//#define PHP_SERVER_CLOCK_END()    do{	\
+									if(php_server_globals.debug)			\
+										printf("takes %d ms\n",clock()-php_server_global_clock);	\
+								  }while(0);
+#define PHP_SERVER_TIME(format,...)		do{	\
+											struct timeval tv;\
+											gettimeofday(&tv,NULL);	\
+											printf(format, ##__VA_ARGS__);\
+											printf("%lds %ldus\n",tv.tv_sec,tv.tv_usec);\
+										}while(0);
+
 
 //长度要加上最后的\0结束符
 //#define PHP_SERVER_RESPONSE "HTTP/1.1 200 OK\r\nServer: php_server 1.0\r\nContent-Length: 11\r\n\r\n0123456789"
@@ -406,10 +426,10 @@ int php_server_set_nonblock(int fd){
 }
 
 /* 为某个fd向epoll事件表添加边沿触发式可读事件  */
-void php_server_epoll_add_read_fd(int epoll_fd,int fd){
+void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events){
 	struct epoll_event event;
 	event.data.fd = fd;
-	event.events = EPOLLIN | EPOLLET;
+	event.events = events;
 	epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd, &event);
 	php_server_set_nonblock(fd);
 }
@@ -606,13 +626,13 @@ zend_bool php_server_clear_init(){
 int php_server_run_master_process(){
 		
 	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
+	int i,j,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
 	char data = PHP_SERVER_DATA_CONN;
 
 	php_server_run_init();
 	
 	/* 父进程监听global_socket */
-	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd);
+	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd,EPOLLIN);
 
 	PHP_SERVER_DEBUG("master while\n");
 	
@@ -625,8 +645,9 @@ int php_server_run_master_process(){
 		
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
-				/*说明有的新的连接到来，那么轮询一个进程处理这个连接*/
-			if(sock_fd == process_global->socket_fd){
+			/*说明有的新的连接到来，那么轮询一个进程处理这个连接*/
+			if((events[i].events & EPOLLIN) && (sock_fd == process_global->socket_fd)){
+				//PHP_SERVER_TIME("master conn come");
 				alive_child = process_global->process_number;
 				while(-1 == process_global->child_pid[child_index]){
 					child_index = (child_index+1)%process_global->process_number;
@@ -641,8 +662,7 @@ int php_server_run_master_process(){
 					//kill(getpid(),SIGTERM);
 					
 					/* 向所有还存活的进程发送信号 */
-					int j;
-					char data = PHP_SERVER_DATA_KILL;
+					data = PHP_SERVER_DATA_KILL;
 					for(j=0;j<process_global->process_number;j++){
 						if(-1 != process_global->child_pid[j]){
 							//kill(process_global->child_pid[i],SIGTERM);
@@ -654,6 +674,7 @@ int php_server_run_master_process(){
 				child_pid = process_global->child_pid[child_index];
 				child_pipe = process_global->pipe_fd[child_index][0];
 				send(child_pipe,(char *) & data,sizeof(data) , 0);
+				PHP_SERVER_DEBUG("worker(%d) %d will accept\n",child_pid,child_index);
 				child_index = (child_index+1)%process_global->process_number;
 			}
 		}
@@ -671,14 +692,14 @@ int php_server_run_master_process(){
 int php_server_recv_from_client(int sock_fd){
 	int ret;
 
-	bzero(recv_buffer,sizeof(recv_buffer));	
+	bzero(recv_buffer,sizeof(recv_buffer));
 
 	ret = recv(sock_fd,recv_buffer,sizeof(recv_buffer),0);
 
 	/* 说明读操作错误，那么不再监听这个连接 */
 	if(ret<0){
 		if(errno != EAGAIN){
-			php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);	
+			php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
 		}
 		PHP_SERVER_DEBUG("worker recv error\n");
 
@@ -710,7 +731,7 @@ int php_server_recv_from_client(int sock_fd){
 		php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
 		//PHP_SERVER_DEBUG("client %d closed\n",sock_fd);
 	}else{
-		//PHP_SERVER_DEBUG("%d recv from %d:%s\n",process_global->process_index,sock_fd,recv_buffer);
+		PHP_SERVER_DEBUG("worker(%d) %d recv from %d:\n%s\n",getpid(),process_global->process_index,sock_fd,recv_buffer);
 		/* callback receive */
 		struct sockaddr_in client;
 		size_t client_len = sizeof(client);
@@ -727,7 +748,7 @@ int php_server_recv_from_client(int sock_fd){
 			if(call_user_function_ex(EG(function_table),NULL,receive_cb,&retval,4,args,0,NULL)){
 				php_error_docref(NULL,E_WARNING,"receive error.\n");
 			}
-			PHP_SERVER_DEBUG("worker %d receive %d after call\n",process_global->process_index,sock_fd);
+			PHP_SERVER_DEBUG("worker(%d) %d receive %d after call\n",getpid(),process_global->process_index,sock_fd);
 			zval_dtor(&args[0]);
 			zval_dtor(&args[1]);
 			zval_dtor(&args[2]);
@@ -750,11 +771,11 @@ int php_server_run_worker_process(){
 	socklen_t client_len = sizeof(client);
 	php_server_run_init();
 	
-	php_server_epoll_add_read_fd(process_global->epoll_fd,parent_pipe_fd);
+	php_server_epoll_add_read_fd(process_global->epoll_fd,parent_pipe_fd,EPOLLIN | EPOLLET);
 	/* 添加父管道的可读事件，以便知道有新的连接到来了 */
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in worker:%d break:%d\n",number,number<0 && errno!=EINTR);
+		PHP_SERVER_DEBUG("epoll come in worker(%d):%d break:%d\n",getpid(),number,number<0 && errno!=EINTR);
 		if(number<0 && errno != EINTR){
 			return	errno; 
 		}
@@ -767,15 +788,16 @@ int php_server_run_worker_process(){
 					continue;
 				}else{
 					if(data==PHP_SERVER_DATA_CONN){
+						//PHP_SERVER_TIME("worker conn come");
 						//有新的连接到来
 						bzero(&client,client_len);
 						conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
 					
-						PHP_SERVER_DEBUG("worker %d accepted %d\n",process_global->process_index,conn_fd);
+						PHP_SERVER_DEBUG("worker(%d) %d accepted %d\n",getpid(),process_global->process_index,conn_fd);
 						if(conn_fd < 0){
 							continue;
 						}
-						php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd);
+						php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd,EPOLLIN | EPOLLET);
 						/* call accept*/
 						zval * accept_cb = zend_hash_str_find(&callback_ht,"accept",sizeof("accept")-1);
 						char client_ip_str[INET_ADDRSTRLEN];
@@ -788,7 +810,7 @@ int php_server_run_worker_process(){
 							if(call_user_function_ex(EG(function_table),NULL,accept_cb,&retval,3,args,0,NULL)){
 								php_error_docref(NULL,E_WARNING,"accept error.\n");
 							}
-							PHP_SERVER_DEBUG("worker %d accept %d after call\n",process_global->process_index,conn_fd);
+							PHP_SERVER_DEBUG("worker(%d) %d accept %d after call\n",getpid(),process_global->process_index,conn_fd);
 							zval_dtor(&args[0]);
 							zval_dtor(&args[1]);
 							zval_dtor(&args[2]);
@@ -801,8 +823,9 @@ int php_server_run_worker_process(){
 				}
 			/*这里除开父进程发送的消息，就只有客户端的消息到来了*/
 			}else if(events[i].events & EPOLLIN){
-				
+				//PHP_SERVER_CLOCK_START();
 				php_server_recv_from_client(sock_fd);
+				//PHP_SERVER_CLOCK_END();
 			}
 		}	
 	}

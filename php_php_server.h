@@ -76,7 +76,7 @@ PHP_FUNCTION(php_server_run);
 void php_server_set_proc_name(int argc,char ** argv,char * name);
 void php_set_proc_name(char * name);
 int php_server_set_nonblock(int fd);
-void php_server_epoll_add_read_fd(int epoll_fd,int fd);
+void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events);
 void php_server_epoll_del_fd(int epoll_fd,int fd);
 void php_server_epoll_remove_fd(int epoll_fd,int fd);
 zend_bool php_server_setup_socket(char * ip,int port);
