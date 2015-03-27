@@ -8,13 +8,12 @@
 3. 信号处理
 4. 压力测试
 
-Server version: Apache/2.4.7 (Ubuntu)
-Linux version 3.13.0-34-generic (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
 
 配置项有：
 
 1. 进程池的大小process\_number
 2. 进程的名称master\_name、worker\_name
+3. 是否开启调试模式debug
 
 
 扩展提供的类与全局函数：
@@ -141,6 +140,10 @@ Linux version 3.13.0-34-generic (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8
 	
 	编辑php.ini并添加
 	extension = php_server.so
+	php_server.process_number = 7
+	php_server.master_name 	  = "php server master"
+	php_server.worker_name 	  = "php server worker"
+	php_server.debug		  =	Off
 	
 	执行php php_server.php即可启动服务器
 
@@ -148,25 +151,27 @@ Linux version 3.13.0-34-generic (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8
 
 可以向master、worker发送SIGTERM或SIGINT信号终止该进程
 
+也可以直接CRTL+C直接结束进程池
+
 服务端首先启动进程池，监听客户连接的到来
 
-![服务端进程](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/server.png)
-
-
 杀死主进程后，主进程收到SIGTERM信号,然后主进程通知所有子进程退出。子进程全部退出后，主进程最后退出。
-
-![向主进程发送终止信号](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/kill.png)
 
 
 ApacheBench：
 
-	VMware® Workstation : 10.0.1 build-1379776
 	PHP Version			: 7.0.0-dev
-	Linux version		: 2.6.32-504.1.3.el6.x86_64 (gcc version 4.4.7 20120313 (Red Hat 4.4.7-11) (GCC) )
+	Linux version		: Linux version 3.13.0-34-generic 
+						  (buildd@allspice) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) )
 	内存					: 1GB
 	处理器				: 1
-	http content		: 0123456789
+	http content		: <h2>PHP SERVER 1.0</h2>
+	content length		: 24 bytes
+	php server version	: 1.0
+	Apache2 version		: Apache/2.4.7 (Ubuntu)
 
-经测试，10次中有8次在3000以上，有两次会急剧减低到800多。
+经测试，PHP-SERVER rps一直在30,000以上,apache2-server rps也在30,000以上。
 
-![ab](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/bench.png)
+![php-server](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/php-server.png)
+
+![apache-server](https://raw.githubusercontent.com/Yaoguais/php-server/master/images/apache-server.png)
