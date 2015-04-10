@@ -61,6 +61,7 @@ PHP_INI_BEGIN()
 	STD_PHP_INI_ENTRY("php_server.master_name", "php server master", PHP_INI_ALL, OnUpdateString, master_name, zend_php_server_globals, php_server_globals)
 	STD_PHP_INI_ENTRY("php_server.worker_name", "php server worker", PHP_INI_ALL, OnUpdateString, worker_name, zend_php_server_globals, php_server_globals)
 	STD_PHP_INI_ENTRY("php_server.debug", "0", PHP_INI_ALL, OnUpdateBool, debug, zend_php_server_globals, php_server_globals)
+	STD_PHP_INI_ENTRY("php_server.debug_file", "", PHP_INI_ALL, OnUpdateString, debug_file, zend_php_server_globals, php_server_globals)
 PHP_INI_END()
 /* }}} */
 
@@ -87,6 +88,15 @@ PHP_INI_END()
 											if(php_server_globals.debug)		\
 												printf(format, ##__VA_ARGS__);	\
 									   }while(0);
+/**
+ *	__will_accept
+ *	__accepted
+ *	__recv_error
+ *	__client_close
+ *	__recv_from
+ *	__send
+ *	__close
+ */
 
 //#define PHP_SERVER_DEBUG(format,...) if(php_server_globals.debug)printf(format, ##__VA_ARGS__);
 
@@ -119,7 +129,6 @@ PHP_INI_END()
 #define BUFFER_SIZE 8096
 char recv_buffer[BUFFER_SIZE];
 
-
 /* 监听的socket_fd  */
 int socket_fd_global;
 
@@ -134,6 +143,7 @@ static HashTable callback_ht;
 /*
 	argsinfo
 */
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_create, 0, 0, 2)
 	ZEND_ARG_INFO(0,ip)
 	ZEND_ARG_INFO(0,port)
@@ -159,10 +169,10 @@ ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_get, 0, 0, 0)
 	ZEND_ARG_INFO(0,key)
 ZEND_END_ARG_INFO()
 
-
 ZEND_BEGIN_ARG_INFO_EX(arginfo_php_server_close, 0, 0, 1)
 	ZEND_ARG_INFO(0,sockfd)
 ZEND_END_ARG_INFO()
+
 
 const zend_function_entry php_server_class_functions[] = {
 		ZEND_FENTRY(__construct,PHP_FN(php_server_create),arginfo_php_server_create,ZEND_ACC_PUBLIC | ZEND_ACC_CTOR)
@@ -214,6 +224,7 @@ PHP_FUNCTION(php_server_send)
 				PHP_SERVER_DEBUG("flush %d size\n",ret);
 			}
 		}
+		PHP_SERVER_DEBUG("__send %d\n",(int)sockfd);
 	}
 	RETURN_LONG(ret);
 }
@@ -223,7 +234,7 @@ PHP_FUNCTION(php_server_close)
 	size_t sockfd;
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) != FAILURE){
 		php_server_epoll_del_fd(process_global->epoll_fd,(int)sockfd);
-		//PHP_SERVER_DEBUG("close sockfd %d\n",(int)sockfd);
+		PHP_SERVER_DEBUG("__close sockfd %d\n",(int)sockfd);
 	}
 }
 
@@ -304,6 +315,7 @@ static void php_php_server_init_globals(zend_php_server_globals *php_server_glob
 	php_server_globals->master_name = NULL;
 	php_server_globals->worker_name = NULL;
 	php_server_globals->debug = 0;
+	php_server_globals->debug_file = "";
 }
 /* }}} */
 
@@ -416,6 +428,50 @@ void php_set_proc_name(char * name){
 	zval_ptr_dtor(&function_name);
 }
 
+/*设置调试信息输出文件*/
+void php_server_set_debug_file(){
+	int fileno;
+	char fileBuf[200];
+	sprintf(fileBuf,php_server_globals.debug_file,getpid());
+	if(strcmp(php_server_globals.debug_file,"")!=0){
+		fileno = open(fileBuf,O_RDWR|O_CREAT, S_IRUSR|S_IWUSR);
+		if(fileno>=0){
+			if(dup2(fileno,STDOUT_FILENO)<0){
+				PHP_SERVER_DEBUG("dup2 error\n");
+			}
+			close(fileno);
+		}else{
+			PHP_SERVER_DEBUG("out fileno open error\n");
+		}
+	}
+}
+/*
+#define TIMES_LEN_MAX 5000
+static long long debug_times[TIMES_LEN_MAX];
+static long debug_times_index = 0;
+void php_server_time_debug(int action){
+	int i;
+	if(0 == action){
+		if(debug_times_index < TIMES_LEN_MAX){
+			struct timeval tv;
+			gettimeofday(&tv,NULL);
+			debug_times[debug_times_index] = tv.tv_usec + tv.tv_sec*1000000;
+			debug_times_index++;
+		}
+	}else if(1 == action){
+		for(i=0;i<debug_times_index;i++){
+			PHP_SERVER_DEBUG("%lld\n",debug_times[debug_times_index]);
+		}
+	}else if(2 == action){
+		long long max = 0,div = 0;
+		for(i=0;i<debug_times_index;i+=2){
+			div = debug_times[debug_times_index+1] - debug_times[debug_times_index];
+			max = div > max ? div : max;
+		}
+		PHP_SERVER_DEBUG("maxtime:%lld\n",max);
+	}
+}*/
+
 /* 设置文件描述符为非阻塞  */
 int php_server_set_nonblock(int fd){
 	int old_option,new_option;
@@ -430,14 +486,15 @@ void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events){
 	struct epoll_event event;
 	event.data.fd = fd;
 	event.events = events;
-	epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd, &event);
 	php_server_set_nonblock(fd);
+	epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd, &event);
 }
 
 /* 把某个fd移除出epoll事件表*/
-void php_server_epoll_del_fd(int epoll_fd,int fd){
-	epoll_ctl(epoll_fd, EPOLL_CTL_DEL,fd,0);
+int php_server_epoll_del_fd(int epoll_fd,int fd){
+	int ret = epoll_ctl(epoll_fd, EPOLL_CTL_DEL,fd,0);
 	close(fd);
+	return ret;
 }
 
 
@@ -603,7 +660,8 @@ void php_server_sig_handler(int signal_no){
 
 /* 启动初始化函数 */
 zend_bool php_server_run_init(){
-	process_global->epoll_fd = epoll_create(5);
+	php_server_set_debug_file();
+	process_global->epoll_fd = epoll_create(MAX_EPOLL_NUMBER);
 	if(process_global->epoll_fd == -1){
 		return FAILURE;
 	}
@@ -622,6 +680,51 @@ zend_bool php_server_clear_init(){
 	return SUCCESS;
 }
 
+void php_server_epoll_debug(char * tag,uint32_t events){
+	if(events & EPOLLET){
+		PHP_SERVER_DEBUG("EPOLLET_MODE ");
+	}
+	if(events & EPOLLIN){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLIN");
+	}
+	if(events & EPOLLPRI){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLPRI");
+	}
+	if(events & EPOLLOUT){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLOUT");
+	}
+	if(events & EPOLLRDNORM){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLRDNORM");
+	}
+	if(events & EPOLLRDBAND){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLRDBAND");
+	}
+	if(events & EPOLLWRNORM){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLWRNORM");
+	}
+	if(events & EPOLLWRBAND){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLWRBAND");
+	}
+	if(events & EPOLLMSG){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLMSG");
+	}
+	if(events & EPOLLERR){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLERR");
+	}
+	if(events & EPOLLHUP){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLHUP");
+	}
+	if(events & EPOLLRDHUP){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLRDHUP");
+	}
+	if(events & EPOLLWAKEUP){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLWAKEUP");
+	}
+	if(events & EPOLLONESHOT){
+		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLONESHOT");
+	}
+}
+
 /* 启动父进程*/
 int php_server_run_master_process(){
 		
@@ -638,13 +741,14 @@ int php_server_run_master_process(){
 	
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in master:%d break:%d\n",number,number<0 && errno!=EINTR);
+		PHP_SERVER_DEBUG("epoll come in master:%d master_break:%d\n",number,number<0 && errno!=EINTR);
 		if(number<0 && errno != EINTR){
 			break; 
 		}
-		
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
+			//进程epoll调试操作
+			php_server_epoll_debug("master",events[i].events);
 			/*说明有的新的连接到来，那么轮询一个进程处理这个连接*/
 			if((events[i].events & EPOLLIN) && (sock_fd == process_global->socket_fd)){
 				//PHP_SERVER_TIME("master conn come");
@@ -658,11 +762,10 @@ int php_server_run_master_process(){
 				}
 				/* 如果子进程存活量为0了，那么就kill自己,然后父进程会通知所有存在的子进程杀掉自己*/
 				if(alive_child == 0){
-					PHP_SERVER_DEBUG("child none, master start kill itself\n");
 					//kill(getpid(),SIGTERM);
-					
 					/* 向所有还存活的进程发送信号 */
 					data = PHP_SERVER_DATA_KILL;
+					PHP_SERVER_DEBUG("child none, master start kill itself	pipe_data %c(%d)\n",data,data);
 					for(j=0;j<process_global->process_number;j++){
 						if(-1 != process_global->child_pid[j]){
 							//kill(process_global->child_pid[i],SIGTERM);
@@ -674,7 +777,7 @@ int php_server_run_master_process(){
 				child_pid = process_global->child_pid[child_index];
 				child_pipe = process_global->pipe_fd[child_index][0];
 				send(child_pipe,(char *) & data,sizeof(data) , 0);
-				PHP_SERVER_DEBUG("worker(%d) %d will accept\n",child_pid,child_index);
+				PHP_SERVER_DEBUG("worker(%d) %d __will_accept pipe_data %c(%d)\n",child_pid,child_index,data,data);
 				child_index = (child_index+1)%process_global->process_number;
 			}
 		}
@@ -687,76 +790,115 @@ int php_server_run_master_process(){
 	return 0;
 }
 
-/* 子进程循环读取消息 */
-
-int php_server_recv_from_client(int sock_fd){
-	int ret;
-
-	bzero(recv_buffer,sizeof(recv_buffer));
-
-	ret = recv(sock_fd,recv_buffer,sizeof(recv_buffer),0);
-
-	/* 说明读操作错误，那么不再监听这个连接 */
-	if(ret<0){
-		if(errno != EAGAIN){
-			php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
-		}
-		PHP_SERVER_DEBUG("worker recv error\n");
-
-	}else if(ret == 0){
-		/* 说明客户端关闭了连接 */
-
-		/*callback close*/
-		struct sockaddr_in client;
-		size_t client_len = sizeof(client);
-		getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
-		zval * close_cb = zend_hash_str_find(&callback_ht,"close",sizeof("close")-1);
-		char client_ip_str[INET_ADDRSTRLEN];
-		long port = (long)ntohs(client.sin_port);
-		if(NULL!=close_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-			zval args[3], retval;
-			ZVAL_LONG(&args[0],sock_fd);
-			ZVAL_STRING(&args[1],client_ip_str);
-			ZVAL_LONG(&args[2],port);
-			if(call_user_function_ex(EG(function_table),NULL,close_cb,&retval,3,args,0,NULL)){
-				php_error_docref(NULL,E_WARNING,"close error.\n");
-			}
-			PHP_SERVER_DEBUG("worker %d close %d after call\n",process_global->process_index,sock_fd);
-			zval_dtor(&args[0]);
-			zval_dtor(&args[1]);
-			zval_dtor(&args[2]);
-		}
-		/*callback close end*/
-
-		php_server_epoll_del_fd(process_global->epoll_fd,sock_fd);
-		//PHP_SERVER_DEBUG("client %d closed\n",sock_fd);
-	}else{
-		PHP_SERVER_DEBUG("worker(%d) %d recv from %d:\n%s\n",getpid(),process_global->process_index,sock_fd,recv_buffer);
-		/* callback receive */
-		struct sockaddr_in client;
-		size_t client_len = sizeof(client);
-		getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
-		zval * receive_cb = zend_hash_str_find(&callback_ht,"receive",sizeof("receive")-1);
-		char client_ip_str[INET_ADDRSTRLEN];
-		long port = (long)ntohs(client.sin_port);
-		if(NULL!=receive_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-			zval args[4], retval;
-			ZVAL_LONG(&args[0],sock_fd);
-			ZVAL_STRINGL(&args[1],recv_buffer,ret);
-			ZVAL_STRING(&args[2],client_ip_str);
-			ZVAL_LONG(&args[3],port);
-			if(call_user_function_ex(EG(function_table),NULL,receive_cb,&retval,4,args,0,NULL)){
-				php_error_docref(NULL,E_WARNING,"receive error.\n");
-			}
-			PHP_SERVER_DEBUG("worker(%d) %d receive %d after call\n",getpid(),process_global->process_index,sock_fd);
-			zval_dtor(&args[0]);
-			zval_dtor(&args[1]);
-			zval_dtor(&args[2]);
-			zval_dtor(&args[3]);
-		}
-		/* callback receive end */
+int php_server_accept_client(){
+	int conn_fd;
+	struct sockaddr_in client;
+	socklen_t client_len = sizeof(client);
+	bzero(&client,client_len);
+	conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
+	if(conn_fd < 0){
+		PHP_SERVER_DEBUG("worker(%d) %d __accept_error %d\n",getpid(),process_global->process_index,conn_fd);
+		return -1;
 	}
-	return ret;
+	PHP_SERVER_DEBUG("worker(%d) %d __accepted %d\n",getpid(),process_global->process_index,conn_fd);
+	php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd,EPOLLIN | EPOLLET);
+	/* call accept*/
+	zval * accept_cb = zend_hash_str_find(&callback_ht,"accept",sizeof("accept")-1);
+	char client_ip_str[INET_ADDRSTRLEN];
+	long port = (long)ntohs(client.sin_port);
+	if(NULL!=accept_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
+		zval args[3], retval;
+		ZVAL_LONG(&args[0],conn_fd);
+		ZVAL_STRING(&args[1],client_ip_str);
+		ZVAL_LONG(&args[2],port);
+		if(call_user_function_ex(EG(function_table),NULL,accept_cb,&retval,3,args,0,NULL)){
+			php_error_docref(NULL,E_WARNING,"accept error.\n");
+		}
+		PHP_SERVER_DEBUG("worker(%d) %d accept %d after call\n",getpid(),process_global->process_index,conn_fd);
+		zval_dtor(&args[0]);
+		zval_dtor(&args[1]);
+		zval_dtor(&args[2]);
+	}
+	return 0;
+}
+
+int php_server_close_client(int sock_fd){
+	/* 说明客户端关闭了连接 */
+	if(php_server_epoll_del_fd(process_global->epoll_fd,sock_fd)<0){
+		return -1;
+	}
+	/*callback close*/
+	struct sockaddr_in client;
+	size_t client_len = sizeof(client);
+	getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
+	zval * close_cb = zend_hash_str_find(&callback_ht,"close",sizeof("close")-1);
+	char client_ip_str[INET_ADDRSTRLEN];
+	long port = (long)ntohs(client.sin_port);
+	if(NULL!=close_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
+		zval args[3], retval;
+		ZVAL_LONG(&args[0],sock_fd);
+		ZVAL_STRING(&args[1],client_ip_str);
+		ZVAL_LONG(&args[2],port);
+		if(call_user_function_ex(EG(function_table),NULL,close_cb,&retval,3,args,0,NULL)){
+			php_error_docref(NULL,E_WARNING,"close error.\n");
+		}
+		zval_dtor(&args[0]);
+		zval_dtor(&args[1]);
+		zval_dtor(&args[2]);
+	}
+	/*callback close end*/
+	return 0;
+}
+
+/* 子进程循环读取消息 */
+int php_server_recv_from_client(int sock_fd){
+	int ret,length = 0;
+	for(;;){
+		bzero(recv_buffer,sizeof(recv_buffer));
+		ret = recv(sock_fd,recv_buffer,sizeof(recv_buffer),0);
+		/* 说明读操作错误，那么不再监听这个连接 */
+		if(ret<0){
+			if(errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN){
+				PHP_SERVER_DEBUG("worker __recv_once\n");
+			}else{
+				if(php_server_close_client(sock_fd) == 0){
+					PHP_SERVER_DEBUG("worker __recv_error\n");
+				}
+			}
+			break;
+		}else if(ret == 0){
+			PHP_SERVER_DEBUG("worker %d __client_close %d after call\n",process_global->process_index,sock_fd);
+			php_server_close_client(sock_fd);
+			break;
+		}else{
+			length += ret;
+			PHP_SERVER_DEBUG("worker(%d) %d __recv_from %d:\n%s\n",getpid(),process_global->process_index,sock_fd,recv_buffer);
+			/* callback receive */
+			struct sockaddr_in client;
+			size_t client_len = sizeof(client);
+			getpeername(sock_fd,(struct sockaddr *)&client,(socklen_t *)&client_len);
+			zval * receive_cb = zend_hash_str_find(&callback_ht,"receive",sizeof("receive")-1);
+			char client_ip_str[INET_ADDRSTRLEN];
+			long port = (long)ntohs(client.sin_port);
+			if(NULL!=receive_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
+				zval args[4], retval;
+				ZVAL_LONG(&args[0],sock_fd);
+				ZVAL_STRINGL(&args[1],recv_buffer,ret);
+				ZVAL_STRING(&args[2],client_ip_str);
+				ZVAL_LONG(&args[3],port);
+				if(call_user_function_ex(EG(function_table),NULL,receive_cb,&retval,4,args,0,NULL)){
+					php_error_docref(NULL,E_WARNING,"receive error.\n");
+				}
+				PHP_SERVER_DEBUG("worker(%d) %d receive %d after call\n",getpid(),process_global->process_index,sock_fd);
+				zval_dtor(&args[0]);
+				zval_dtor(&args[1]);
+				zval_dtor(&args[2]);
+				zval_dtor(&args[3]);
+			}
+			/* callback receive end */
+		}
+	}
+	return length;
 }
 
 
@@ -765,71 +907,50 @@ int php_server_recv_from_client(int sock_fd){
 int php_server_run_worker_process(){
 	
 	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,number,ret,sock_fd,conn_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
+	int i,number,ret,sock_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
 	char data = PHP_SERVER_DATA_INIT;
-	struct sockaddr_in client;
-	socklen_t client_len = sizeof(client);
 	php_server_run_init();
 	
 	php_server_epoll_add_read_fd(process_global->epoll_fd,parent_pipe_fd,EPOLLIN | EPOLLET);
 	/* 添加父管道的可读事件，以便知道有新的连接到来了 */
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in worker(%d):%d break:%d\n",getpid(),number,number<0 && errno!=EINTR);
+		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
 		if(number<0 && errno != EINTR){
-			return	errno; 
+			break;
 		}
-		
+		//for(i=number-1;i>=0;i--){
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
-			if(sock_fd == parent_pipe_fd && (events[i].events & EPOLLIN)){
-				ret = recv(sock_fd,(char *) & data, sizeof(data),0);
-				if( ( ret < 0 && errno != EAGAIN) || ret == 0 ){
-					continue;
-				}else{
-					if(data==PHP_SERVER_DATA_CONN){
-						//PHP_SERVER_TIME("worker conn come");
-						//有新的连接到来
-						bzero(&client,client_len);
-						conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
-					
-						PHP_SERVER_DEBUG("worker(%d) %d accepted %d\n",getpid(),process_global->process_index,conn_fd);
-						if(conn_fd < 0){
-							continue;
-						}
-						php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd,EPOLLIN | EPOLLET);
-						/* call accept*/
-						zval * accept_cb = zend_hash_str_find(&callback_ht,"accept",sizeof("accept")-1);
-						char client_ip_str[INET_ADDRSTRLEN];
-						long port = (long)ntohs(client.sin_port);
-						if(NULL!=accept_cb && port > 0 && NULL != inet_ntop(AF_INET,(void *)&client.sin_addr.s_addr,client_ip_str,INET_ADDRSTRLEN)){
-							zval args[3], retval;
-							ZVAL_LONG(&args[0],conn_fd);
-							ZVAL_STRING(&args[1],client_ip_str);
-							ZVAL_LONG(&args[2],port);
-							if(call_user_function_ex(EG(function_table),NULL,accept_cb,&retval,3,args,0,NULL)){
-								php_error_docref(NULL,E_WARNING,"accept error.\n");
+			//进程epoll调试操作
+			php_server_epoll_debug("worker",events[i].events);
+			if(events[i].events & EPOLLIN){
+				if(sock_fd == parent_pipe_fd){
+					for(;;){
+						data = PHP_SERVER_DATA_INIT;
+						ret = recv(sock_fd,(char *) & data, sizeof(data),0);
+						/* 这里不考虑父进程关闭管道，因为如果关闭的话这个程序会立即退出 */
+						if(ret>0){
+							PHP_SERVER_DEBUG("worker(%d)%d __pipe_data %d(%c)\n",getpid(),process_global->process_index,data,data);
+							if(data==PHP_SERVER_DATA_CONN){
+								//有新的连接到来,当接收连接出现失败,那么继续接下来的业务
+								php_server_accept_client();
+							}else if(data==PHP_SERVER_DATA_KILL){
+								/*如果收到终止的信息，那么还是先把没有处理完的业务处理完再退出*/
+								process_global->is_stop = 1;
+							}else{
+								break;
 							}
-							PHP_SERVER_DEBUG("worker(%d) %d accept %d after call\n",getpid(),process_global->process_index,conn_fd);
-							zval_dtor(&args[0]);
-							zval_dtor(&args[1]);
-							zval_dtor(&args[2]);
+						}else{
+							break;
 						}
-						/*call accept end*/
-					}else if(data==PHP_SERVER_DATA_KILL){
-						process_global->is_stop = 1;
-						break;
 					}
+				}else{
+					php_server_recv_from_client(sock_fd);
 				}
-			/*这里除开父进程发送的消息，就只有客户端的消息到来了*/
-			}else if(events[i].events & EPOLLIN){
-				//PHP_SERVER_CLOCK_START();
-				php_server_recv_from_client(sock_fd);
-				//PHP_SERVER_CLOCK_END();
 			}
-		}	
+		}
 	}
-
 	php_server_clear_init();
 	return 0;
 }

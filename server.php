@@ -18,8 +18,8 @@ function bind_receive($fd,$message,$ip,$port){
 	//$messageLen = strlen($message);
 	//echo "receive $fd $messageLen $ip $port rrrrrrrrrrrrrrrrrrrr]\n";
 	//echo $message;
-	$content = "<html><body><h2>PHP SERVER 1.0</h2></body></html>";
-	$contentLen = strlen($content);
+	$content = "<h2>PHP SERVER 1.0</h2>";
+	$contentLen = sizeof($content);
 	$dateStr = date('r');
 	$response = <<<EOF
 HTTP/1.1 200 OK
