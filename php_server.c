@@ -486,7 +486,6 @@ void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events){
 	struct epoll_event event;
 	event.data.fd = fd;
 	event.events = events;
-	php_server_set_nonblock(fd);
 	epoll_ctl(epoll_fd,EPOLL_CTL_ADD,fd, &event);
 }
 
@@ -524,7 +523,7 @@ zend_bool php_server_setup_socket(char * ip,int port){
 		return FAILURE;
 	}
 	
-	ret = listen(socket_fd_global,5);
+	ret = listen(socket_fd_global,SOMAXCONN);
 
 	if(ret == -1){
 		PHP_SERVER_DEBUG("listen error\n");
@@ -647,6 +646,8 @@ void php_server_sig_handler(int signal_no){
 				}
 			}
 			break;
+			case SIGUSR1:
+			break;
 		}
 	}else{
 		switch(signal_no){
@@ -724,32 +725,31 @@ void php_server_epoll_debug(char * tag,uint32_t events){
 		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLONESHOT");
 	}
 }
-
-/* 启动父进程*/
+/* 启动父进程
 int php_server_run_master_process(){
-		
+
 	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,j,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
 	char data = PHP_SERVER_DATA_CONN;
 
 	php_server_run_init();
-	
-	/* 父进程监听global_socket */
+
+	//父进程监听global_socket
 	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd,EPOLLIN);
 
 	PHP_SERVER_DEBUG("master while\n");
-	
+
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
 		PHP_SERVER_DEBUG("epoll come in master:%d master_break:%d\n",number,number<0 && errno!=EINTR);
 		if(number<0 && errno != EINTR){
-			break; 
+			break;
 		}
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
 			//进程epoll调试操作
 			php_server_epoll_debug("master",events[i].events);
-			/*说明有的新的连接到来，那么轮询一个进程处理这个连接*/
+			//说明有的新的连接到来，那么轮询一个进程处理这个连接
 			if((events[i].events & EPOLLIN) && (sock_fd == process_global->socket_fd)){
 				//PHP_SERVER_TIME("master conn come");
 				alive_child = process_global->process_number;
@@ -760,10 +760,10 @@ int php_server_run_master_process(){
 						break;
 					}
 				}
-				/* 如果子进程存活量为0了，那么就kill自己,然后父进程会通知所有存在的子进程杀掉自己*/
+				//如果子进程存活量为0了,父进程会通知所有存在的子进程杀掉自己
 				if(alive_child == 0){
 					//kill(getpid(),SIGTERM);
-					/* 向所有还存活的进程发送信号 */
+					//向所有还存活的进程发送信号
 					data = PHP_SERVER_DATA_KILL;
 					PHP_SERVER_DEBUG("child none, master start kill itself	pipe_data %c(%d)\n",data,data);
 					for(j=0;j<process_global->process_number;j++){
@@ -781,6 +781,31 @@ int php_server_run_master_process(){
 				child_index = (child_index+1)%process_global->process_number;
 			}
 		}
+	}
+
+	php_server_clear_init();
+	if(number<0){
+		return errno;
+	}
+	return 0;
+}*/
+
+
+/* 启动父进程*/
+int php_server_run_master_process(){
+		
+	struct epoll_event events[MAX_EPOLL_NUMBER];
+	int i,j,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
+	char data = PHP_SERVER_DATA_CONN;
+
+	php_server_run_init();
+	
+
+
+	PHP_SERVER_DEBUG("master while\n");
+	
+	while(!process_global->is_stop){
+
 	}
 	
 	php_server_clear_init();
@@ -801,6 +826,7 @@ int php_server_accept_client(){
 		return -1;
 	}
 	PHP_SERVER_DEBUG("worker(%d) %d __accepted %d\n",getpid(),process_global->process_index,conn_fd);
+	php_server_set_nonblock(conn_fd);
 	php_server_epoll_add_read_fd(process_global->epoll_fd,conn_fd,EPOLLIN | EPOLLET);
 	/* call accept*/
 	zval * accept_cb = zend_hash_str_find(&callback_ht,"accept",sizeof("accept")-1);
@@ -902,17 +928,15 @@ int php_server_recv_from_client(int sock_fd){
 }
 
 
-
-/* 启动子进程  */
+/* 启动子进程
 int php_server_run_worker_process(){
-	
 	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,ret,sock_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
 	char data = PHP_SERVER_DATA_INIT;
 	php_server_run_init();
-	
+
 	php_server_epoll_add_read_fd(process_global->epoll_fd,parent_pipe_fd,EPOLLIN | EPOLLET);
-	/* 添加父管道的可读事件，以便知道有新的连接到来了 */
+	//添加父管道的可读事件，以便知道有新的连接到来了
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
 		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
@@ -929,14 +953,14 @@ int php_server_run_worker_process(){
 					for(;;){
 						data = PHP_SERVER_DATA_INIT;
 						ret = recv(sock_fd,(char *) & data, sizeof(data),0);
-						/* 这里不考虑父进程关闭管道，因为如果关闭的话这个程序会立即退出 */
+						//这里不考虑父进程关闭管道，因为如果关闭的话这个程序会立即退出
 						if(ret>0){
 							PHP_SERVER_DEBUG("worker(%d)%d __pipe_data %d(%c)\n",getpid(),process_global->process_index,data,data);
 							if(data==PHP_SERVER_DATA_CONN){
 								//有新的连接到来,当接收连接出现失败,那么继续接下来的业务
 								php_server_accept_client();
 							}else if(data==PHP_SERVER_DATA_KILL){
-								/*如果收到终止的信息，那么还是先把没有处理完的业务处理完再退出*/
+								//如果收到终止的信息，那么还是先把没有处理完的业务处理完再退出
 								process_global->is_stop = 1;
 							}else{
 								break;
@@ -944,6 +968,43 @@ int php_server_run_worker_process(){
 						}else{
 							break;
 						}
+					}
+				}else{
+					php_server_recv_from_client(sock_fd);
+				}
+			}
+		}
+	}
+	php_server_clear_init();
+	return 0;
+}
+*/
+
+
+/* 启动子进程  */
+int php_server_run_worker_process(){
+	struct epoll_event events[MAX_EPOLL_NUMBER];
+	int i,number,ret,sock_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
+	char data = PHP_SERVER_DATA_INIT;
+	php_server_run_init();
+	//进程监听global_socket
+	php_server_set_nonblock(process_global->socket_fd);
+	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd,EPOLLIN);
+	//添加父管道的可读事件，以便知道有新的连接到来了
+	while(!process_global->is_stop){
+		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
+		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
+		if(number<0 && errno != EINTR){
+			break;
+		}
+		for(i=0;i<number;i++){
+			sock_fd = events[i].data.fd;
+			//进程epoll调试操作
+			php_server_epoll_debug("worker",events[i].events);
+			if(events[i].events & EPOLLIN){
+				if(sock_fd == process_global->socket_fd){
+					while(php_server_accept_client()!=-1){
+
 					}
 				}else{
 					php_server_recv_from_client(sock_fd);
