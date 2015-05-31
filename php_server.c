@@ -276,6 +276,8 @@ PHP_FUNCTION(php_server_run){
 	}
 
 	zend_bool ret;
+	//强制使用单进程模式
+	PHP_SERVER_G(process_number) = 1;
 	int process_number=PHP_SERVER_G(process_number);
 
 	//PHP_SERVER_DEBUG("function is ok !\n");
@@ -288,19 +290,28 @@ PHP_FUNCTION(php_server_run){
 		return;
 	}
 
-	ret = php_server_setup_process_pool(socket_fd_global,process_number);
+	/*ret = php_server_setup_process_pool(socket_fd_global,process_number);
 	//PHP_SERVER_DEBUG("setup_process_pool:%d\n",ret);
 	if(ret!=SUCCESS){
 		php_error_docref(NULL,E_ERROR,"create process poll error\n");
 		return;
-	}
+	}*/
+	process_global = (server_process * ) malloc(sizeof(server_process));
+	process_global->socket_fd = socket_fd_global;
+	process_global->process_number = process_number;
+	process_global->is_stop = 1;
+	process_global->process_index = -1;
+
+	php_set_proc_name(PHP_SERVER_G(master_name));
 
 	PHP_SERVER_DEBUG("server %d is running.\n",process_global->process_index);
-	php_server_run();
+	//php_server_run();
+	php_server_run_process();
 	PHP_SERVER_DEBUG("server %d is stopping.\n",process_global->process_index);
 
-	ret = php_server_shutdown_process_pool(process_number);
-	//PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());
+	/*ret = php_server_shutdown_process_pool(process_number);
+	//PHP_SERVER_DEBUG("shutdown_process_pool:%d pid:%d\n",ret,getpid());*/
+	free(process_global);
 
 	ret = php_server_shutdown_socket();
 	//PHP_SERVER_DEBUG("shutdown_socket:%d pid:%d\n------------------------\n",ret,getpid());
@@ -445,32 +456,6 @@ void php_server_set_debug_file(){
 		}
 	}
 }
-/*
-#define TIMES_LEN_MAX 5000
-static long long debug_times[TIMES_LEN_MAX];
-static long debug_times_index = 0;
-void php_server_time_debug(int action){
-	int i;
-	if(0 == action){
-		if(debug_times_index < TIMES_LEN_MAX){
-			struct timeval tv;
-			gettimeofday(&tv,NULL);
-			debug_times[debug_times_index] = tv.tv_usec + tv.tv_sec*1000000;
-			debug_times_index++;
-		}
-	}else if(1 == action){
-		for(i=0;i<debug_times_index;i++){
-			PHP_SERVER_DEBUG("%lld\n",debug_times[debug_times_index]);
-		}
-	}else if(2 == action){
-		long long max = 0,div = 0;
-		for(i=0;i<debug_times_index;i+=2){
-			div = debug_times[debug_times_index+1] - debug_times[debug_times_index];
-			max = div > max ? div : max;
-		}
-		PHP_SERVER_DEBUG("maxtime:%lld\n",max);
-	}
-}*/
 
 /* 设置文件描述符为非阻塞  */
 int php_server_set_nonblock(int fd){
@@ -540,122 +525,13 @@ zend_bool php_server_shutdown_socket(){
 	return SUCCESS;
 }
 
-/*创建进程池*/
-
-zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_number){
-	
-	int i,ret;
-	pid_t pid;
-
-	process_global = (server_process * ) malloc(sizeof(server_process));
-
-	process_global->pipe_fd = (int **)malloc(sizeof(int * ) * process_number);
-
-	for(i=0; i<process_number;i++){
-		process_global->pipe_fd[i] = (int *) malloc(sizeof(int) * 2);		
-	}	
-
-	process_global->socket_fd = socket_fd;
-
-	process_global->process_number = 0;
-	
-	process_global->is_stop = 1;	
-
-	for(i=0;	i<process_number;	i++){
-
-		process_global->socket_fd = socket_fd_global;
-		
-		ret = socketpair(PF_UNIX,	SOCK_STREAM,	0,process_global->pipe_fd[i]);
-
-		if(ret!=0){
-			return FAILURE;
-		}
-
-		pid = fork();
-
-		if(pid > 0){
-			PHP_SERVER_DEBUG("child %d is created\n",pid);
-			if(0 == i){
-				//php_set_proc_name("php server master");
-				php_set_proc_name(PHP_SERVER_G(master_name));
-				process_global->child_pid = (pid_t * ) malloc(sizeof(pid_t) * process_number);
-				process_global->process_number = process_number;
-			}
-			process_global->process_index = -1;
-			process_global->child_pid[i] = pid;
-			close(process_global->pipe_fd[i][1]);
-			continue;
-		}else if(0 == pid){
-			//php_set_proc_name("php server worker");
-			php_set_proc_name(PHP_SERVER_G(worker_name));
-			process_global->process_index = i;
-			close(process_global->pipe_fd[i][0]);
-			break;
-		}else{
-			return FAILURE;
-		}
-	}
-
-	return SUCCESS;
-}
 /* 信号处理函数  */
 void php_server_sig_handler(int signal_no){
-	
-	static int killed_child = 0;
-	int i;
-	pid_t pid;	
-	char data = PHP_SERVER_DATA_KILL;
-
-	PHP_SERVER_DEBUG("server %d get %d(%d:%d:%d)\n",process_global->process_index,signal_no,SIGCHLD,SIGTERM,SIGINT);
-
-	if(process_global->process_index == -1){
-		switch(signal_no){
-			/* 如果子进程退出，那么设置其pid为-1并关闭其管道  */
-			case SIGCHLD:
-			for(;;){
-				if((pid = waitpid(-1,NULL,WNOHANG)) > 0){
-					for(i=0; i<process_global->process_number; i++){
-						PHP_SERVER_DEBUG("%d ",process_global->child_pid[i]);
-						if(pid == process_global->child_pid[i]){
-							process_global->child_pid[i] = -1;
-							close(process_global->pipe_fd[i][0]);
-							PHP_SERVER_DEBUG("child %d:%d out\n",pid,i);
-							killed_child++;
-							break;
-						}
-					}
-				}else{
-					PHP_SERVER_DEBUG("sigchld break\n");
-					break;
-				}
-				/* 当退出的进程数量达到子进程的总量，那么父进程也紧跟着退出 */
-				if(killed_child == process_global->process_number){
-					process_global->is_stop = 1;
-				}
-				PHP_SERVER_DEBUG("pid %d get,killed child %d\n",pid,killed_child);
-			}
-			break;
-
-			case SIGTERM:
-			case SIGINT:
-			/* 向所有还存活的进程发送信号 */
-			for(i=0;i<process_global->process_number;i++){
-				if(-1 != process_global->child_pid[i]){
-					//kill(process_global->child_pid[i],SIGTERM);
-					send(process_global->pipe_fd[i][0],(char *) &data,sizeof(data),0);
-				}
-			}
-			break;
-			case SIGUSR1:
-			break;
-		}
-	}else{
-		switch(signal_no){
-			case SIGTERM:
-			case SIGINT:
-			process_global->is_stop = 1;
-			break;
-		}
+	switch(signal_no){
+		case SIGTERM:
+		case SIGINT:
+		process_global->is_stop = 1;
+		break;
 	}
 }
 
@@ -668,7 +544,6 @@ zend_bool php_server_run_init(){
 	}
 	process_global->is_stop = 0;
 	/*设置信号处理函数*/
-	signal(SIGCHLD,php_server_sig_handler);
 	signal(SIGTERM,php_server_sig_handler);
 	signal(SIGINT,php_server_sig_handler);
 	return SUCCESS;
@@ -725,93 +600,35 @@ void php_server_epoll_debug(char * tag,uint32_t events){
 		PHP_SERVER_DEBUG("%s%s\n",tag,"EPOLLONESHOT");
 	}
 }
-/* 启动父进程
-int php_server_run_master_process(){
 
+/* 启动服务器 */
+int php_server_run_process(){
 	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,j,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
-	char data = PHP_SERVER_DATA_CONN;
-
+	int i,number,ret,sock_fd;
 	php_server_run_init();
-
-	//父进程监听global_socket
+	//进程监听global_socket
+	php_server_set_nonblock(process_global->socket_fd);
 	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd,EPOLLIN);
-
-	PHP_SERVER_DEBUG("master while\n");
-
 	while(!process_global->is_stop){
 		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in master:%d master_break:%d\n",number,number<0 && errno!=EINTR);
+		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
 		if(number<0 && errno != EINTR){
 			break;
 		}
 		for(i=0;i<number;i++){
 			sock_fd = events[i].data.fd;
 			//进程epoll调试操作
-			php_server_epoll_debug("master",events[i].events);
-			//说明有的新的连接到来，那么轮询一个进程处理这个连接
-			if((events[i].events & EPOLLIN) && (sock_fd == process_global->socket_fd)){
-				//PHP_SERVER_TIME("master conn come");
-				alive_child = process_global->process_number;
-				while(-1 == process_global->child_pid[child_index]){
-					child_index = (child_index+1)%process_global->process_number;
-					alive_child--;
-					if(0 == alive_child){
-						break;
-					}
+			php_server_epoll_debug("worker",events[i].events);
+			if(events[i].events & EPOLLIN){
+				if(sock_fd == process_global->socket_fd){
+					php_server_accept_client();
+				}else{
+					php_server_recv_from_client(sock_fd);
 				}
-				//如果子进程存活量为0了,父进程会通知所有存在的子进程杀掉自己
-				if(alive_child == 0){
-					//kill(getpid(),SIGTERM);
-					//向所有还存活的进程发送信号
-					data = PHP_SERVER_DATA_KILL;
-					PHP_SERVER_DEBUG("child none, master start kill itself	pipe_data %c(%d)\n",data,data);
-					for(j=0;j<process_global->process_number;j++){
-						if(-1 != process_global->child_pid[j]){
-							//kill(process_global->child_pid[i],SIGTERM);
-							send(process_global->pipe_fd[j][0],(char *) &data,sizeof(data),0);
-						}
-					}
-					break;
-				}
-				child_pid = process_global->child_pid[child_index];
-				child_pipe = process_global->pipe_fd[child_index][0];
-				send(child_pipe,(char *) & data,sizeof(data) , 0);
-				PHP_SERVER_DEBUG("worker(%d) %d __will_accept pipe_data %c(%d)\n",child_pid,child_index,data,data);
-				child_index = (child_index+1)%process_global->process_number;
 			}
 		}
 	}
-
 	php_server_clear_init();
-	if(number<0){
-		return errno;
-	}
-	return 0;
-}*/
-
-
-/* 启动父进程*/
-int php_server_run_master_process(){
-		
-	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,j,number,sock_fd,child_index = 0,child_pid,child_pipe,alive_child;
-	char data = PHP_SERVER_DATA_CONN;
-
-	php_server_run_init();
-	
-
-
-	PHP_SERVER_DEBUG("master while\n");
-	
-	while(!process_global->is_stop){
-
-	}
-	
-	php_server_clear_init();
-	if(number<0){
-		return errno;
-	}
 	return 0;
 }
 
@@ -925,119 +742,6 @@ int php_server_recv_from_client(int sock_fd){
 		}
 	}
 	return length;
-}
-
-
-/* 启动子进程
-int php_server_run_worker_process(){
-	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,number,ret,sock_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
-	char data = PHP_SERVER_DATA_INIT;
-	php_server_run_init();
-
-	php_server_epoll_add_read_fd(process_global->epoll_fd,parent_pipe_fd,EPOLLIN | EPOLLET);
-	//添加父管道的可读事件，以便知道有新的连接到来了
-	while(!process_global->is_stop){
-		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
-		if(number<0 && errno != EINTR){
-			break;
-		}
-		//for(i=number-1;i>=0;i--){
-		for(i=0;i<number;i++){
-			sock_fd = events[i].data.fd;
-			//进程epoll调试操作
-			php_server_epoll_debug("worker",events[i].events);
-			if(events[i].events & EPOLLIN){
-				if(sock_fd == parent_pipe_fd){
-					for(;;){
-						data = PHP_SERVER_DATA_INIT;
-						ret = recv(sock_fd,(char *) & data, sizeof(data),0);
-						//这里不考虑父进程关闭管道，因为如果关闭的话这个程序会立即退出
-						if(ret>0){
-							PHP_SERVER_DEBUG("worker(%d)%d __pipe_data %d(%c)\n",getpid(),process_global->process_index,data,data);
-							if(data==PHP_SERVER_DATA_CONN){
-								//有新的连接到来,当接收连接出现失败,那么继续接下来的业务
-								php_server_accept_client();
-							}else if(data==PHP_SERVER_DATA_KILL){
-								//如果收到终止的信息，那么还是先把没有处理完的业务处理完再退出
-								process_global->is_stop = 1;
-							}else{
-								break;
-							}
-						}else{
-							break;
-						}
-					}
-				}else{
-					php_server_recv_from_client(sock_fd);
-				}
-			}
-		}
-	}
-	php_server_clear_init();
-	return 0;
-}
-*/
-
-
-/* 启动子进程  */
-int php_server_run_worker_process(){
-	struct epoll_event events[MAX_EPOLL_NUMBER];
-	int i,number,ret,sock_fd,parent_pipe_fd = process_global->pipe_fd[process_global->process_index][1];
-	char data = PHP_SERVER_DATA_INIT;
-	php_server_run_init();
-	//进程监听global_socket
-	php_server_set_nonblock(process_global->socket_fd);
-	php_server_epoll_add_read_fd(process_global->epoll_fd, process_global->socket_fd,EPOLLIN);
-	//添加父管道的可读事件，以便知道有新的连接到来了
-	while(!process_global->is_stop){
-		number = epoll_wait(process_global->epoll_fd,events,MAX_EPOLL_NUMBER,-1);
-		PHP_SERVER_DEBUG("epoll come in worker:%d worker_break:%d pid(%d)\n",number,number<0 && errno!=EINTR,getpid());
-		if(number<0 && errno != EINTR){
-			break;
-		}
-		for(i=0;i<number;i++){
-			sock_fd = events[i].data.fd;
-			//进程epoll调试操作
-			php_server_epoll_debug("worker",events[i].events);
-			if(events[i].events & EPOLLIN){
-				if(sock_fd == process_global->socket_fd){
-					while(php_server_accept_client()!=-1){
-
-					}
-				}else{
-					php_server_recv_from_client(sock_fd);
-				}
-			}
-		}
-	}
-	php_server_clear_init();
-	return 0;
-}
-
-/* 父子进程统一启动进程的函数*/
-void php_server_run(){
-	if(process_global->process_index == -1){
-		php_server_run_master_process();
-	}else{
-		php_server_run_worker_process();
-	}
-}
-
-
-/* 销毁进程池  */
-zend_bool php_server_shutdown_process_pool(unsigned int process_number){
-	int i;
-	for(i = 0; i<process_number; i++){
-		free(process_global->pipe_fd[i]);
-	}
-	free(process_global->pipe_fd);
-	if(process_global->process_index == -1){
-		free(process_global->child_pid);
-	}
-	free(process_global);
-	return SUCCESS;
 }
 /* {{{ php_server_functions[]
  *

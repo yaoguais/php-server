@@ -83,18 +83,14 @@ void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events);
 int php_server_epoll_del_fd(int epoll_fd,int fd);
 zend_bool php_server_setup_socket(char * ip,int port);
 zend_bool php_server_shutdown_socket();
-zend_bool php_server_setup_process_pool(int socket_fd,	unsigned int process_number);
 void php_server_sig_handler(int signal_no);
 zend_bool php_server_run_init();
 zend_bool php_server_clear_init();
 void php_server_epoll_debug(char * tag,uint32_t events);
-int php_server_run_master_process();
+int php_server_run_process();
 int php_server_accept_client();
 int php_server_close_client(int sock_fd);
 int php_server_recv_from_client(int sock_fd);
-int php_server_run_worker_process();
-void php_server_run();
-zend_bool php_server_shutdown_process_pool(unsigned int process_number);
 
 
 /* Always refer to the globals in your function as PHP_SERVER_G(variable).

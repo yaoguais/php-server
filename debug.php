@@ -32,8 +32,8 @@ function get_first_file(&$files){
 	return $ret;
 }
 
-$firstFile = get_first_file($files);
-$keywords = array('__will_accept','epoll come in master:0','epoll come in master:1','master_break:0','master_break:1');
+//$firstFile = get_first_file($files);
+//$keywords = array('__will_accept','epoll come in master:0','epoll come in master:1','master_break:0','master_break:1');
 
 function debug_file($file,$keywords){
 	echo pathinfo($file,PATHINFO_FILENAME),"\n";
@@ -44,7 +44,7 @@ function debug_file($file,$keywords){
 	echo "\n";
 }
 
-debug_file($firstFile,$keywords);
+//debug_file($firstFile,$keywords);
 
 $keywords = array('__accepted','__accept_error','__recv_error','__recv_from','__recv_once','__send','__close','__client_close');
 
