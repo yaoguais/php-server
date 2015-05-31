@@ -1,13 +1,13 @@
 # PHP SERVER #
 
-这是一个可以作为TCP服务器的PHP扩展。
+这是一个可以作为TCP服务器的PHP扩展,性能跟Apache不相上下,在单机4G内存4核上rqs都在3万以上。
 
-1. [配置选项](#配置选项)
-2. 类与函数
-3. 安装扩展
-4. 信号处理
-5. 调试程序
-6. 压力测试
+1. [配置选项](https://github.com/Yaoguais/php-server#配置选项)
+2. [类与函数](https://github.com/Yaoguais/php-server#类与函数)
+3. [安装扩展](https://github.com/Yaoguais/php-server#安装扩展)
+4. [信号处理](https://github.com/Yaoguais/php-server#信号处理)
+5. [调试程序](https://github.com/Yaoguais/php-server#调试程序)
+6. [压力测试](https://github.com/Yaoguais/php-server#压力测试)
 
 
 #配置选项#
