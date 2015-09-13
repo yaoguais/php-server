@@ -12,7 +12,7 @@
   | obtain it through the world-wide-web, please send a note to          |
   | license@php.net so we can mail you a copy immediately.               |
   +----------------------------------------------------------------------+
-  | Author:                                                              |
+  | Author: Yaoguai (newtopstdio@163.com)                                |
   +----------------------------------------------------------------------+
 */
 
@@ -24,7 +24,8 @@
 extern zend_module_entry php_server_module_entry;
 #define phpext_php_server_ptr &php_server_module_entry
 
-#define PHP_PHP_SERVER_VERSION "0.1.0" /* Replace with version number for your extension */
+//fix 7.0.0RC1
+#define PHP_PHP_SERVER_VERSION "0.1.1"
 
 #ifdef PHP_WIN32
 #	define PHP_PHP_SERVER_API __declspec(dllexport)
@@ -40,30 +41,16 @@ extern zend_module_entry php_server_module_entry;
 
 
 ZEND_BEGIN_MODULE_GLOBALS(php_server)
-	int process_number;
 	char * master_name;
-	char * worker_name;
 	int debug;
 	char * debug_file;
 ZEND_END_MODULE_GLOBALS(php_server)
 
 
-/* 定义存储进程信息的结构体 */
 typedef struct php_server_process{
-	//当前子进程的数量
-	unsigned int	process_number;		
-	//当前进程的序号,父进程为-1,子进程从0开始
-	int		process_index;
-	//子进程的PID
-	pid_t * child_pid;
-	//epoll事件表标识
 	int epoll_fd;
-	//整个应用监听的sokect
 	int socket_fd;
-	//当前进程是否停止运行
-	zend_bool is_stop;
-	//用作进程间通讯的双端管道
-	int ** pipe_fd;	
+	int is_stop;
 }server_process;
 
 /* function declare*/
@@ -74,10 +61,8 @@ PHP_FUNCTION(php_server_close);
 PHP_FUNCTION(php_server_set);
 PHP_FUNCTION(php_server_get);
 PHP_FUNCTION(php_server_run);
-void php_server_set_proc_name(int argc,char ** argv,char * name);
 void php_set_proc_name(char * name);
 void php_server_set_debug_file();
-//void php_server_time_debug(int action);
 int php_server_set_nonblock(int fd);
 void php_server_epoll_add_read_fd(int epoll_fd,int fd,uint32_t events);
 int php_server_epoll_del_fd(int epoll_fd,int fd);
@@ -91,12 +76,6 @@ int php_server_run_process();
 int php_server_accept_client();
 int php_server_close_client(int sock_fd);
 int php_server_recv_from_client(int sock_fd);
-
-
-/* Always refer to the globals in your function as PHP_SERVER_G(variable).
-   You are encouraged to rename these macros something shorter, see
-   examples in any other php module directory.
-*/
 
 #ifdef ZTS
 #define PHP_SERVER_G(v) ZEND_TSRMG(php_server_globals_id, zend_php_server_globals *, v)
