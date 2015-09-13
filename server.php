@@ -1,23 +1,39 @@
 <?php
+// path/to/php7/php server.php
+// path/to/php7/php server.php enable-debug
+define('ACCEPT','accept');
+define('RECEIVE','receive');
+define('CLOSE','close');
+log_reset();
 
-$server = new php_server('127.0.0.1',9009);
-
-//print_r($server->get());
-
-function bind_accept($fd,$ip,$port){
-	//echo "accept $fd $ip $port aaaaaaaaaaaaaaaaaaaaaaa]\n";
-//	echo "accept ",microtime(true),"\n";
+$ip = '127.0.0.1';
+$port = 9009;
+$server = new php_server($ip,$port);
+/* test */
+$settings = $server->get();
+if( empty($settings) ||  $ip != $settings['ip'] || $port != $settings['port'] ){
+	exit(__LINE__);
 }
-
+if( $ip != $server->get('ip') || $port != $server->get('port') ){
+	exit(__LINE__);
+}
+$port2 = 9010;
+$server->set('port',$port2);
+if( $port2 != $server->get('port') ){
+	exit(__LINE__);
+}
+$server->set('port',$port);
+if( $port != $server->get('port') ){
+	exit(__LINE__);
+}
+/* test end */
+function bind_accept($fd,$ip,$port){
+	user_log(ACCEPT);
+}
 $server->bind('accept','bind_accept');
 
 function bind_receive($fd,$message,$ip,$port){
-	//$start = microtime(true);
-	//$message = rtrim($message,"\r\n");
-	//echo "receive $fd $message $ip $port ]\n";
-	//$messageLen = strlen($message);
-	//echo "receive $fd $messageLen $ip $port rrrrrrrrrrrrrrrrrrrr]\n";
-	//echo $message;
+	user_log(RECEIVE);
 	$content = "<h2>PHP SERVER 1.0</h2>";
 	$contentLen = sizeof($content);
 	$dateStr = date('r');
@@ -35,28 +51,33 @@ $content
 EOF;
 	php_server_send($fd,$response,false);
 	php_server_close($fd);
-	//$end = microtime(true);
-	//echo "$start $end\n",($end - $start)*1000,"ms\n\n";
 }
 
 $server->bind('receive','bind_receive');
-
 function bind_close($fd,$ip,$port){
-	//echo "close $fd $ip $port ccccccccccccccccccc]\n";
+	user_log(CLOSE);
+}
+$server->bind('close','bind_close');
+$server->run();
+log_message();
+
+function log_reset(){
+	if(isset($_SERVER['argv'][1])){
+		@unlink(__DIR__.'/test.out');
+	}	
 }
 
-$server->bind('close','bind_close');
+function user_log($msg){
+	if(isset($_SERVER['argv'][1])){
+		file_put_contents(__DIR__.'/test.out',$msg,FILE_APPEND);
+	}
+}
 
-/*$server->bind('accept',function($fd,$ip,$port){
-		echo "accept\n";
-});
-
-$server->bind('receive',function($fd,$message,$ip,$port){
-		echo "receive\n";
-});
-
-$server->bind('close',function($fd,$ip,$port){
-		echo "close\n";
-});
-*/
-$server->run();
+function log_message(){
+	if(isset($_SERVER['argv'][1])){
+		$content = file_get_contents(__DIR__.'/test.out');
+		echo ACCEPT,': ',substr_count($content,ACCEPT),"\n";
+		echo RECEIVE,': ',substr_count($content,RECEIVE),"\n";
+		echo CLOSE,': ',substr_count($content,CLOSE),"\n";
+	}
+}

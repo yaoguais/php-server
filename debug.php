@@ -1,6 +1,7 @@
 <?php
 
-$dir = "/home/yaoguai/debug";
+$dir = ini_get('php_server.debug_file');
+$dir = $dir ? dirname($dir) : "/home/yaoguai/debug";
 
 function get_files($dir){
 	$files = array();
@@ -25,8 +26,7 @@ function get_first_file(&$files){
 			$min = $pid;
 			$fileKey = $key;
 		}
-	}
-	
+	}	
 	$ret = $files[$fileKey];
 	unset($files[$fileKey]);
 	return $ret;

@@ -1,6 +1,6 @@
 # PHP SERVER #
 
-这是一个可以作为TCP服务器的PHP扩展,性能跟Apache不相上下,在单机4G内存4核上rqs都在3万以上。
+这是一个可以作为TCP服务器的PHP扩展(适用7.0.0RC1),性能跟Apache不相上下,在单机4G内存4核上rqs都在3万以上。
 
 1. [配置选项](https://github.com/Yaoguais/php-server#配置选项)
 2. [类与函数](https://github.com/Yaoguais/php-server#类与函数)
@@ -81,7 +81,7 @@
 	     * @return string
 	     * function php_server_get
 	     */
-	    public function get($key){
+	    public function get($key=null){
 	
 	        return is_string($key) ? $this->_settings[$key] : $this->_settings;
 	    }
@@ -196,6 +196,8 @@
 	ab -c 100 -n 1000 http://127.0.0.1:9009/
 	#在第一个的终端CTRL+C结束server.php
 	#运行结果收集程序
+	/root/php7d/bin/php server.php enable-debug
+	#ctrl+C 结束进程屏幕会显示accept,receive,close的统计数量
 	/root/php7d/bin/php debug.php
 	#屏幕会显示关于接收连接、接收数据、发送数据、关闭连接的统计
 

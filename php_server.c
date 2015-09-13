@@ -61,10 +61,11 @@ PHP_INI_END()
 												printf(format, ##__VA_ARGS__);	\
 									   }while(0);
 
+//no need for thread safe
 #define BUFFER_SIZE 8096
 static char recv_buffer[BUFFER_SIZE];
 static int socket_fd_global;
-server_process *  process_global;
+static server_process *  process_global;
 static zend_class_entry * php_server_class_entry;
 static HashTable callback_ht;
 
@@ -110,10 +111,20 @@ const zend_function_entry php_server_class_functions[] = {
 PHP_FUNCTION(php_server_create)
 {
 	char * ip;
-	size_t ip_len,port;
+	size_t ip_len;
+	zend_long port;
+
+#ifdef FAST_ZPP
+	ZEND_PARSE_PARAMETERS_START(2,2)
+	Z_PARAM_STRING(ip,ip_len)
+	Z_PARAM_LONG(port)
+	ZEND_PARSE_PARAMETERS_END();
+#else
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"sl",&ip,&ip_len,&port) == FAILURE){
 		return;
 	}
+#endif
+
 	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
 	array_init(this_settings);
 	add_assoc_stringl_ex(this_settings,"ip",sizeof("ip")-1,ip,ip_len);
@@ -124,9 +135,18 @@ PHP_FUNCTION(php_server_create)
 PHP_FUNCTION(php_server_bind)
 {
 	zval * event , *callback;
+
+#ifdef FAST_ZPP
+	ZEND_PARSE_PARAMETERS_START(2,2)
+	Z_PARAM_ZVAL(event)
+	Z_PARAM_ZVAL(callback)
+	ZEND_PARSE_PARAMETERS_END();
+#else
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"zz",&event,&callback) == FAILURE || Z_TYPE_P(event) != IS_STRING){
 		return;
 	}
+#endif
+
 	zend_hash_add(&callback_ht,Z_STR_P(event),callback);
 	zval_ptr_dtor(event);
 	zval_ptr_dtor(callback);
@@ -134,53 +154,97 @@ PHP_FUNCTION(php_server_bind)
 
 PHP_FUNCTION(php_server_send) {
 	char * message;
-	size_t sockfd, message_len;
+	size_t message_len;
+	zend_long sockfd;
 	zend_bool is_flush = 0;
 	int ret = -1;
 	FILE * fp;
+
+#ifdef FAST_ZPP
+	ZEND_PARSE_PARAMETERS_START(2,3)
+	Z_PARAM_LONG(sockfd)
+	Z_PARAM_STRING(message,message_len)
+	Z_PARAM_OPTIONAL
+	Z_PARAM_BOOL(is_flush)
+	ZEND_PARSE_PARAMETERS_END();
+#else
 	if (zend_parse_parameters(ZEND_NUM_ARGS(), "ls|b", &sockfd, &message,
-			&message_len, &is_flush) != FAILURE) {
-		ret = send((int) sockfd, message, message_len, 0);
-		if (is_flush) {
-			if (NULL != (fp = fdopen(sockfd, "rw"))) {
-				fflush(fp);
-				fp = NULL;
-				PHP_SERVER_DEBUG("__flush %d size\n", ret);
-			}
-		}
-		PHP_SERVER_DEBUG("__send %d\n", (int )sockfd);
+				&message_len, &is_flush) != FAILURE) {
+		return;
 	}
+#endif
+
+	ret = send((int) sockfd, message, message_len, 0);
+	if (is_flush) {
+		if (NULL != (fp = fdopen(sockfd, "rw"))) {
+			fflush(fp);
+			fp = NULL;
+			PHP_SERVER_DEBUG("__flush %d size\n", ret);
+		}
+	}
+	PHP_SERVER_DEBUG("__send %d\n", (int )sockfd);
+
 	RETURN_LONG(ret);
 }
 
 PHP_FUNCTION(php_server_close)
 {
-	size_t sockfd;
-	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) != FAILURE){
-		php_server_epoll_del_fd(process_global->epoll_fd,(int)sockfd);
-		PHP_SERVER_DEBUG("__close sockfd %d\n",(int)sockfd);
+	zend_long sockfd;
+
+#ifdef FAST_ZPP
+	ZEND_PARSE_PARAMETERS_START(1,1)
+	Z_PARAM_LONG(sockfd)
+	ZEND_PARSE_PARAMETERS_END();
+#else
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"l",&sockfd) == FAILURE){
+		return;
 	}
+#endif
+
+	php_server_close_client(sockfd);
+	PHP_SERVER_DEBUG("__close sockfd %d\n",(int)sockfd);
 }
 
 PHP_FUNCTION(php_server_set)
 {
-	char * key_str, * tmp_str;
-	size_t key_len,tmp_len;
+	char * key_str;
+	size_t key_len;
 	zval *value;
+
+#ifdef FAST_APP
+	ZEND_PARSE_PARAMETERS_START(2,2)
+	Z_PARAM_STRING(key_str,key_len)
+	Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+#else
 	if(zend_parse_parameters(ZEND_NUM_ARGS(),"sz",&key_str,&key_len,&value) == FAILURE){
 		return;
-	}else{
-		zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
-		zend_hash_str_update(Z_ARRVAL_P(this_settings),key_str,key_len,value);
 	}
+#endif
+
+	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
+	zend_hash_str_update(Z_ARRVAL_P(this_settings),key_str,key_len,value);
 }
 
 PHP_FUNCTION(php_server_get)
 {
 	char * key = NULL;
 	size_t key_len;
+
+#ifdef FAST_APP
+	ZEND_PARSE_PARAMETERS_START(0,1)
+	Z_PARAM_OPTIONAL
+	Z_PARAM_STRING(key,key_len)
+	Z_PARAM_ZVAL(value)
+	ZEND_PARSE_PARAMETERS_END();
+#else
+	if(zend_parse_parameters(ZEND_NUM_ARGS(),"|s",&key,&key_len) == FAILURE){
+		return;
+	}
+#endif
+
 	zval * this_settings = zend_read_property(php_server_class_entry,getThis(),"_settings",sizeof("_settings")-1,0,NULL);
-	if(1!= ZEND_NUM_ARGS() || zend_parse_parameters(ZEND_NUM_ARGS(),"s",&key,&key_len) == FAILURE){
+	if(0 == ZEND_NUM_ARGS()){
 		RETURN_ZVAL(this_settings,1,NULL);
 	}else{
 		zval * retval = zend_hash_str_find(Z_ARRVAL_P(this_settings),key,key_len);
