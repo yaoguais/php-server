@@ -196,10 +196,12 @@
 	ab -c 100 -n 1000 http://127.0.0.1:9009/
 	#在第一个的终端CTRL+C结束server.php
 	#运行结果收集程序
-	/root/php7d/bin/php server.php enable-debug
-	#ctrl+C 结束进程屏幕会显示accept,receive,close的统计数量
 	/root/php7d/bin/php debug.php
 	#屏幕会显示关于接收连接、接收数据、发送数据、关闭连接的统计
+
+	#在脚本中收集调试信息(上面是扩展中的内部收集数据)
+	/root/php7d/bin/php server.php enable-debug
+	#ctrl+C 结束进程屏幕会显示accept,receive,close的统计数量
 
 在开启调试模式的时候，rqs一直在8000左右，只有关闭调试的四分之一。
 	

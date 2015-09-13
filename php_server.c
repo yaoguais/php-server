@@ -61,7 +61,7 @@ PHP_INI_END()
 												printf(format, ##__VA_ARGS__);	\
 									   }while(0);
 
-//no need for thread safe
+// no need for thread safe
 #define BUFFER_SIZE 8096
 static char recv_buffer[BUFFER_SIZE];
 static int socket_fd_global;
@@ -270,11 +270,11 @@ PHP_FUNCTION(php_server_run){
 		return;
 	}
 
-	process_global = (server_process * ) malloc(sizeof(server_process));
+	process_global = (server_process * ) emalloc(sizeof(server_process));
 	process_global->socket_fd = socket_fd_global;
 	php_set_proc_name(PHP_SERVER_G(master_name));
 	php_server_run_process();
-	free(process_global);
+	efree(process_global);
 	php_server_shutdown_socket();
 }
 
@@ -434,7 +434,7 @@ zend_bool php_server_clear_init(){
 	return SUCCESS;
 }
 
-int php_server_run_process(){
+zend_bool php_server_run_process(){
 	struct epoll_event events[MAX_EPOLL_NUMBER];
 	int i,number,ret,sock_fd;
 	php_server_run_init();
@@ -458,10 +458,10 @@ int php_server_run_process(){
 		}
 	}
 	php_server_clear_init();
-	return 0;
+	return SUCCESS;
 }
 
-int php_server_accept_client(){
+zend_bool php_server_accept_client(){
 	int conn_fd;
 	struct sockaddr_in client;
 	socklen_t client_len = sizeof(client);
@@ -469,7 +469,7 @@ int php_server_accept_client(){
 	conn_fd = accept(process_global->socket_fd,(struct sockaddr *) & client, &client_len);
 	if(conn_fd < 0){
 		PHP_SERVER_DEBUG("worker(%d) __accept_error %d\n",getpid(),conn_fd);
-		return -1;
+		return FAILURE;
 	}
 	PHP_SERVER_DEBUG("worker(%d) __accepted %d\n",getpid(),conn_fd);
 	php_server_set_nonblock(conn_fd);
@@ -492,12 +492,12 @@ int php_server_accept_client(){
 		zval_dtor(&args[2]);
 	}
 	/* call accept end */
-	return 0;
+	return SUCCESS;
 }
 
-int php_server_close_client(int sock_fd){
+zend_bool php_server_close_client(int sock_fd){
 	if(php_server_epoll_del_fd(process_global->epoll_fd,sock_fd)<0){
-		return -1;
+		return FAILURE;
 	}
 	/* call close */
 	struct sockaddr_in client;
@@ -519,7 +519,7 @@ int php_server_close_client(int sock_fd){
 		zval_dtor(&args[2]);
 	}
 	/* call close end */
-	return 0;
+	return SUCCESS;
 }
 
 int php_server_recv_from_client(int sock_fd){
@@ -530,16 +530,17 @@ int php_server_recv_from_client(int sock_fd){
 		if(ret<0){
 			if(errno == EINTR || errno == EWOULDBLOCK || errno == EAGAIN){
 				PHP_SERVER_DEBUG("worker __recv_once\n");
+				break;
 			}else{
-				if(php_server_close_client(sock_fd) == 0){
+				if(SUCCESS == php_server_close_client(sock_fd)){
 					PHP_SERVER_DEBUG("worker __recv_error\n");
 				}
+				return -1;
 			}
-			break;
 		}else if(ret == 0){
 			PHP_SERVER_DEBUG("worker %d __client_close after call\n",sock_fd);
 			php_server_close_client(sock_fd);
-			break;
+			return 0;
 		}else{
 			length += ret;
 			PHP_SERVER_DEBUG("worker(%d) __recv_from %d:\n%s\n",getpid(),sock_fd,recv_buffer);

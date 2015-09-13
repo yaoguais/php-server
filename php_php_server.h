@@ -24,7 +24,7 @@
 extern zend_module_entry php_server_module_entry;
 #define phpext_php_server_ptr &php_server_module_entry
 
-//fix 7.0.0RC1
+// fix 7.0.0RC1
 #define PHP_PHP_SERVER_VERSION "0.1.1"
 
 #ifdef PHP_WIN32
@@ -53,7 +53,7 @@ typedef struct php_server_process{
 	int is_stop;
 }server_process;
 
-/* function declare*/
+/* function declare */
 PHP_FUNCTION(php_server_create);
 PHP_FUNCTION(php_server_bind);
 PHP_FUNCTION(php_server_send);
@@ -72,9 +72,9 @@ void php_server_sig_handler(int signal_no);
 zend_bool php_server_run_init();
 zend_bool php_server_clear_init();
 void php_server_epoll_debug(char * tag,uint32_t events);
-int php_server_run_process();
-int php_server_accept_client();
-int php_server_close_client(int sock_fd);
+zend_bool php_server_run_process();
+zend_bool php_server_accept_client();
+zend_bool php_server_close_client(int sock_fd);
 int php_server_recv_from_client(int sock_fd);
 
 #ifdef ZTS
